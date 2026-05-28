@@ -11,8 +11,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db, get_db_unscoped, require_role
+from app.models.attrition_curve import AttritionCurve
 from app.models.base import new_uuid
 from app.models.org import Organization
+from app.models.org_settings import OrgSettings
 from app.models.user import User, UserRole
 from app.schemas.org import OrgOut, OrgSignupIn
 from app.security import hash_password
@@ -54,6 +56,26 @@ async def signup(
         role=UserRole.ORG_ADMIN,
     )
     db.add(admin)
+
+    # Phase 2 seed: every new org gets the three attrition presets (Low /
+    # Standard / High) and an OrgSettings row, with Standard as the default
+    # curve. PRD §5.1 defaults — chosen to be conservative-on-screening per
+    # the engine modeling decisions.
+    low = AttritionCurve(
+        org_id=org.id, name="Low", total_dropout_pct=0.10, is_preset=True
+    )
+    standard = AttritionCurve(
+        org_id=org.id, name="Standard", total_dropout_pct=0.20, is_preset=True
+    )
+    high = AttritionCurve(
+        org_id=org.id, name="High", total_dropout_pct=0.35, is_preset=True
+    )
+    db.add_all([low, standard, high])
+    await db.flush()  # standard.id is needed for OrgSettings.default_attrition_curve_id
+
+    settings = OrgSettings(org_id=org.id, default_attrition_curve_id=standard.id)
+    db.add(settings)
+
     return org
 
 

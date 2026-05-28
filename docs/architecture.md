@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅)
+**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 🟡 deliverables done, awaiting smoke)
 
 ## Top-level system
 
@@ -23,7 +23,13 @@ flowchart LR
     subgraph Routers
       R_HEALTH[routers.health]
       R_AUTH[routers.auth]
-      R_ORGS[routers.orgs]
+      R_ORGS["routers.orgs<br/>(now seeds OrgSettings + 3 presets)"]
+      R_ORGSET[routers.org_settings]
+      R_SITES[routers.sites]
+      R_CURVES[routers.attrition_curves]
+      R_TRIALS["routers.trials<br/>(CRUD + activate + arms nested)"]
+      R_VISITS[routers.visits]
+      R_STRIALS[routers.site_trials]
     end
 
     subgraph Core
@@ -37,8 +43,29 @@ flowchart LR
       M_BASE[base: Base, OrgScopedMixin, TimestampMixin]
       M_ORG[Organization]
       M_USER["User + UserRole enum"]
+      M_ORGSET[OrgSettings]
+      M_CURVE[AttritionCurve]
+      M_SITE[Site]
+      M_TRIAL["Trial + TrialStatus enum"]
+      M_ARM[Arm]
+      M_VISIT["Visit + VisitType enum"]
+      M_STRIAL[SiteTrial]
+      M_STVO[SiteTrialVisitOverride]
       M_ORG --> M_BASE
       M_USER --> M_BASE
+      M_ORGSET --> M_BASE
+      M_CURVE --> M_BASE
+      M_SITE --> M_BASE
+      M_TRIAL --> M_BASE
+      M_ARM --> M_BASE
+      M_VISIT --> M_BASE
+      M_STRIAL --> M_BASE
+      M_STVO --> M_BASE
+    end
+
+    subgraph Services
+      SVC_RES["resolution<br/>(live-read OrgSettings → effective duration)"]
+      SVC_ACT["trial_activation<br/>(draft→active validator)"]
     end
 
     MAIN --> Routers
@@ -53,6 +80,15 @@ flowchart LR
     DB --> CFG
     R_ORGS --> M_ORG
     R_ORGS --> M_USER
+    R_ORGS --> M_ORGSET
+    R_ORGS --> M_CURVE
+    R_TRIALS --> SVC_ACT
+    SVC_ACT --> M_TRIAL
+    SVC_ACT --> M_VISIT
+    SVC_ACT --> M_STRIAL
+    SVC_RES --> M_ORGSET
+    SVC_RES --> M_VISIT
+    SVC_RES --> M_STVO
   end
 
   subgraph Data
@@ -88,7 +124,9 @@ flowchart LR
 ## Notes
 
 - **`engine`** has internal structure now (forecast + metrics + helpers + types) but still no *outgoing* edges to anything outside the package — that's enforced by `tests/test_engine_purity.py` (walks every submodule and asserts no forbidden imports leaked into `sys.modules`). It'll get an *incoming* edge from the backend in Phase 4 (forecast wiring). Until then it remains in-tree but deliberately decoupled per CLAUDE.md golden rule #2.
-- **`OrgSettings`** isn't in the diagram yet because the table lands in Phase 2 (PRD §9.2). It will then become the source of every tunable default (durations, utilization thresholds, attrition curve, etc.) — read live, not snapshotted.
+- **`OrgSettings`** is now wired (Phase 2). The resolution service reads it live on every call — a PATCH to its duration fields immediately re-flows to every inheriting trial/visit. Explicit overrides at the visit or site-trial level are preserved.
+- **`AttritionCurve`** is the only org-scoped table whose RLS policy admits NULL `org_id` rows (for future global seeds). No global seeds ship in v1; the column shape is in place.
+- **Service layer** (`app/services/`) is new in Phase 2. `resolution.py` is intentionally the same shape as `engine/duration.py` — Phase 4 will use it to build the `OrgDurationDefaults` dataclass that gets handed into the engine. `trial_activation.py` returns a structured failure list rather than fail-fast, so the wizard UI in Phase 5 can surface every blocker together.
 - **`arq worker`** has no work yet but the container is wired so the Phase 5 hookup (Claude vision SoA parser) is a code change, not infra.
 - **Two-role DB split** (`app_owner` BYPASSRLS for Alembic, `app_user` RLS-enforced at runtime) is what makes tenant isolation auditable, not just intended.
 - Every domain model inherits `OrgScopedMixin` (carries `org_id`) except `Organization` itself.

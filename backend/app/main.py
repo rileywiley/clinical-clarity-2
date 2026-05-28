@@ -2,7 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, health, orgs
+from app.routers import (
+    attrition_curves,
+    auth,
+    health,
+    org_settings,
+    orgs,
+    site_trials,
+    sites,
+    trials,
+    visits,
+)
 
 
 def create_app() -> FastAPI:
@@ -20,6 +30,12 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(orgs.router)
+    app.include_router(org_settings.router)
+    app.include_router(sites.router)
+    app.include_router(attrition_curves.router)
+    app.include_router(trials.router)
+    app.include_router(visits.router)
+    app.include_router(site_trials.router)
     return app
 
 

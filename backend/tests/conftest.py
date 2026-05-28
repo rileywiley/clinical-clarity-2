@@ -149,7 +149,9 @@ async def truncate_between_tests() -> AsyncIterator[None]:
     settings = get_settings()
     engine = create_async_engine(settings.database_url_admin, poolclass=None)
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE users, organizations RESTART IDENTITY CASCADE"))
+        # CASCADE drops every org-scoped row via the org_id FK ON DELETE CASCADE
+        # chain, so we only need to name the tenant roots explicitly.
+        await conn.execute(text("TRUNCATE organizations RESTART IDENTITY CASCADE"))
     await engine.dispose()
     yield
 

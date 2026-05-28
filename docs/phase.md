@@ -9,7 +9,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 |---|---|---|---|---|---|
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
 | 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
-| 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ⬜ | — | — | |
+| 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | 🟡 | ✅ | _pending_ | Started 2026-05-28 |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ⬜ | — | — | Keyboard nav + paste are first-class acceptance criteria |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
 | 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
@@ -113,3 +113,43 @@ Engine purity test enforces CLAUDE.md golden rule #2: the test imports every sub
 Saved to project memory and noted in the engine source:
 - **Triangular window normalization: full window, mass may fall outside.** Mass landing past the reported horizon is unreported. Consistent with PRD §6.3's conservative-on-screening posture (under-reporting at edges is safe for a don't-oversell tool).
 - **Attrition shape: linear back-loaded by visit index.** Survival decays linearly across the randomized chain so cumulative dropout at the last visit = `curve.total_dropout_pct`. Defensible and tractable for hand-computed fixtures; can be A/B-tested in v1.5 if real data argues for a different shape.
+
+---
+
+## Phase 2 — Core data model & CRUD 🟡
+
+**Started:** 2026-05-28
+
+### Delivered
+- Models (all org-scoped, RLS-protected unless noted): `OrgSettings`, `AttritionCurve` (org_id nullable for future global seeds; permissive policy already in place), `Site`, `Trial`, `Arm`, `Visit`, `SiteTrial`, `SiteTrialVisitOverride`.
+- Alembic migration `0002_phase2_core_entities.py` — every new table gets the same `org_id::text = current_setting('app.current_org_id', true)` policy shape as the Phase 0 `users` table. `attrition_curves` has the wider `OR org_id IS NULL` clause to support future global seeds. Runtime grants extended to the new tables.
+- Signup (`POST /orgs`) now also seeds: one `OrgSettings` row with PRD §5.1 defaults, and three `AttritionCurve` presets (Low 10% / Standard 20% / High 35%), with Standard set as `OrgSettings.default_attrition_curve_id`. This makes a fresh org immediately usable.
+- API surface (38 routes total): `/org-settings` (GET, PATCH, admin-only), `/sites` (CRUD, write gated to Org Admin/Ops Lead), `/attrition-curves` (list/POST/PATCH, admin), `/trials` (CRUD + `/activate`), `/trials/:id/arms` and `/arms/:id/visits` (nested CRUD), `/trials/:id/sites` + `/site-trials/:id/visit-overrides` (assignments + overrides).
+- Services: `app/services/resolution.py` (PRD §5.2 live-default resolver — site override → visit override → org type default, reading OrgSettings live) and `app/services/trial_activation.py` (draft→active validator with structured failure reasons).
+- Validations enforced: `fpfv ≤ lpfv ≤ lplv` on POST and PATCH; `operating_weekdays` subset of {0..6}; `hours_per_day > 0`; `rooms ≥ 1`; `window_days ≥ 0`; `total_dropout_pct ∈ [0,1)`.
+- Trial creation auto-creates a "Default Arm" for single-arm trials (`is_multi_arm = False`), so the UI never has to force arm-thinking.
+
+### Gate — automated smoke test ✅
+
+`backend/tests/test_trial_setup_e2e.py` (12 backend tests total, including Phase 0's 4):
+
+```
+12 passed in 2.96s
+```
+
+Covers:
+- Signup auto-seeds OrgSettings + three attrition presets
+- Site CRUD + validations (operating_weekdays range, hours > 0)
+- Trial date-order validation (`lpfv > lplv` → 422)
+- Full happy-path activation: site → trial → arms → visits → site assignment → activate
+- Activation correctly rejects: missing randomization visit, missing sites
+- **OrgSettings PATCH live-reflows** to the resolution service (the load-bearing assertion for §5.2)
+- RLS isolation on Phase 2 tables (Org A's trials/sites invisible to Org B)
+
+Engine: 30/30 tests still green — no regression in the pure forecast layer.
+
+### Gate — manual smoke ⏳ in progress
+- [ ] Walk one end-to-end flow (`curl` against a running backend, the same path as the e2e test) for spot-check
+
+### Activation rule (saved as project memory)
+`draft → active` requires: ≥1 SoA visit + ≥1 randomization visit + ≥1 active SiteTrial + an attrition curve assigned. Pricing is **not** part of activation (PRD §7.1 separates "volume-ready" from "revenue-ready").
