@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 🟡 deliverables done, awaiting smoke)
+**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅)
 
 ## Top-level system
 

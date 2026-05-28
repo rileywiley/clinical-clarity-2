@@ -28,6 +28,11 @@ dist/
 *.tsbuildinfo
 .eslintcache
 
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/screenshots/
+
 # Env / secrets
 .env
 .env.*

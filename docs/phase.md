@@ -10,7 +10,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
 | 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
-| 3 | Projections & actuals (TanStack spreadsheet grid) | 🟡 | ✅ | _pending_ | Started 2026-05-28; keyboard nav + paste are first-class acceptance criteria |
+| 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
 | 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
 | 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
@@ -156,9 +156,9 @@ Engine: 30/30 tests still green — no regression in the pure forecast layer.
 
 ---
 
-## Phase 3 — Projections & actuals 🟡
+## Phase 3 — Projections & actuals ✅
 
-**Started:** 2026-05-28
+**Started:** 2026-05-28 · **Completed:** 2026-05-28
 
 ### Delivered
 
@@ -210,8 +210,19 @@ Frontend covers the PRD §7.3 first-class acceptance criteria:
 - Divider drawn after the configured row
 - Paste parser unit tests for TSV / CRLF / thousands commas / garbage
 
-### Gate — manual smoke ⏳ in progress
-- [ ] Bring up backend + frontend dev server, log in, open `/projections`, type into cells with the keyboard, Tab around, Enter down, arrow nav, paste a small block from a spreadsheet, edit a past actual, click Save, refresh and confirm persistence, open the history drawer, attempt to navigate away with unsaved changes (confirm prompt fires)
+### Gate — manual smoke ✅
+
+Driven end-to-end by `frontend/e2e/phase3-smoke.spec.ts` (Playwright + real Chromium against running backend + Vite dev server) on 2026-05-28. Screenshots captured in `frontend/e2e/screenshots/` (gitignored — regenerable from `pnpm exec playwright test`).
+
+- [x] Backend curl walkthrough: zero-padded GET, bulk PUT, **past projection → 409**, past actual succeeds, audit records one row for the proj_screened 20→25 edit and zero rows for the unchanged proj_randomized or the actual_screened. Variance returns `diff=-47 randomization, -59 screening` without rejecting.
+- [x] Browser-rendered grid loads with proper row classes: past rows show projection cells greyed/disabled, current week is highlighted with a horizontal divider below, future rows show actual cells greyed.
+- [x] Variance hints render in amber on under-target ("Randomized 0 / goal 100 · 100 under").
+- [x] Typing into a future-projection cell + Tab to the next cell moves keyboard focus correctly (cell highlight follows). Save button flips from greyed "Saved" to active "Save" on dirty.
+- [x] Save → button flips to "Saved", variance hint updates to reflect the new totals.
+- [x] Edit the same cell + save again → history drawer shows **one entry: "Projected Screened 12 → 15"** with timestamp.
+- [x] Attempt to navigate to Home with unsaved changes → `useBlocker` fires a browser-native confirm dialog; dismissing it keeps the user on `/projections` with the edit intact.
+
+**Caught and fixed during smoke:** `useBlocker` from react-router-dom v6 requires the data router (`createBrowserRouter`), not the classic `BrowserRouter`. Migrated `main.tsx` accordingly.
 
 ### Save model + activation rule (saved as feedback memory)
 - **Explicit Save button** with dirty-state indicator (button label flips Save ↔ Saved).
