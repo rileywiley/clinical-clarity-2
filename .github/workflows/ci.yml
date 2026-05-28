@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: engine (lint + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.4"
+      - run: uv python install 3.12
+      - run: uv sync --frozen 2>/dev/null || uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest
+
+  backend:
+    name: backend (lint + tests w/ Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clinical_clarity
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # The conftest sets up app_owner/app_user roles before migrations run.
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clinical_clarity
+      DATABASE_URL: postgresql+asyncpg://app_user:app_user_pw@localhost:5432/clinical_clarity
+      DATABASE_URL_ADMIN: postgresql+asyncpg://app_owner:app_owner_pw@localhost:5432/clinical_clarity
+      SESSION_SECRET: ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.4"
+      - run: uv python install 3.12
+      - run: uv sync --frozen 2>/dev/null || uv sync
+      - run: uv run ruff check .
+      - name: Bootstrap DB roles
+        run: |
+          sudo apt-get install -y postgresql-client
+          psql -h localhost -U postgres -d clinical_clarity -f ../docker/postgres-init/01-roles.sql
+      - run: uv run alembic -c alembic.ini upgrade head
+      - run: uv run pytest
+
+  frontend:
+    name: frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.15.0"
+      - run: pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+      - run: pnpm run lint
+      - run: pnpm run build

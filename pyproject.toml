@@ -1,0 +1,22 @@
+[project]
+name = "clinical-clarity-2"
+version = "0.1.0"
+description = "Volume Forecasting Platform — multi-tenant SaaS for clinical trial site networks"
+requires-python = ">=3.12,<3.13"
+
+# This root pyproject is workspace metadata only. The two real Python packages
+# are /engine and /backend, each with its own pyproject.toml managed by uv.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",  # ruff format handles line length
+  "B008",  # FastAPI uses Depends(...)/Cookie(...) in defaults; that's the idiom
+]
+
+[tool.ruff.format]
+quote-style = "double"

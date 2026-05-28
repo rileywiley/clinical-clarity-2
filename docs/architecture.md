@@ -1,0 +1,84 @@
+# Architecture — dependency diagram
+
+Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
+
+**Last refreshed:** 2026-05-28 (Phase 0 ✅ complete)
+
+## Top-level system
+
+```mermaid
+flowchart LR
+  subgraph Client["frontend (React+TS+Vite+Tailwind)"]
+    APP[App.tsx]
+    PAGES[pages: Login, Home]
+    API_CLIENT[api.ts]
+    APP --> PAGES
+    APP --> API_CLIENT
+  end
+
+  subgraph Backend["backend (FastAPI)"]
+    MAIN[main.create_app]
+    direction TB
+
+    subgraph Routers
+      R_HEALTH[routers.health]
+      R_AUTH[routers.auth]
+      R_ORGS[routers.orgs]
+    end
+
+    subgraph Core
+      CFG[config: Settings]
+      SEC[security: Argon2 + signed cookies]
+      DB[db: engine, sessionmaker, set_tenant]
+      DEPS[deps: get_db, get_current_user, require_role]
+    end
+
+    subgraph Models
+      M_BASE[base: Base, OrgScopedMixin, TimestampMixin]
+      M_ORG[Organization]
+      M_USER["User + UserRole enum"]
+      M_ORG --> M_BASE
+      M_USER --> M_BASE
+    end
+
+    MAIN --> Routers
+    R_AUTH --> SEC
+    R_AUTH --> DB
+    R_ORGS --> DB
+    R_ORGS --> SEC
+    Routers --> DEPS
+    DEPS --> SEC
+    DEPS --> DB
+    DEPS --> M_USER
+    DB --> CFG
+    R_ORGS --> M_ORG
+    R_ORGS --> M_USER
+  end
+
+  subgraph Data
+    PG[("PostgreSQL 16<br/>RLS on users, organizations<br/>app_owner BYPASSRLS · app_user RLS-enforced")]
+    RD[("Redis 7 — idle")]
+  end
+
+  WORKER["arq worker — idle until Phase 5"]
+  ALEMBIC["alembic migrations<br/>(runs as app_owner)"]
+
+  ENG["engine — placeholder, built in Phase 1"]
+
+  Client -- "cookie auth via /api proxy" --> MAIN
+  Backend -- "asyncpg as app_user" --> PG
+  ALEMBIC --> PG
+  WORKER --> RD
+  WORKER --> PG
+```
+
+## Notes
+
+- **`engine`** has no edges yet. That is intentional — it'll connect to the backend in Phase 4 (forecast wiring). It is *not* orphaned; it is in-tree but deliberately decoupled per CLAUDE.md golden rule #2 (the engine stays pure, no web/DB/HTTP deps).
+- **`OrgSettings`** isn't in the diagram yet because the table lands in Phase 2 (PRD §9.2). It will then become the source of every tunable default (durations, utilization thresholds, attrition curve, etc.) — read live, not snapshotted.
+- **`arq worker`** has no work yet but the container is wired so the Phase 5 hookup (Claude vision SoA parser) is a code change, not infra.
+- **Two-role DB split** (`app_owner` BYPASSRLS for Alembic, `app_user` RLS-enforced at runtime) is what makes tenant isolation auditable, not just intended.
+- Every domain model inherits `OrgScopedMixin` (carries `org_id`) except `Organization` itself.
+- Every request runs inside a transaction with `SET LOCAL app.current_org_id = '<uuid>'`; RLS policies on each org-scoped table read that via `current_setting('app.current_org_id')`.
+- The `/auth/login` route binds the requested `org_id` as the tenant *before* the user lookup so RLS doesn't hide the row being authenticated against — UUIDs aren't enumerable, so this doesn't leak.
+- Frontend dev hits the backend via Vite's `/api` proxy, keeping both on the same origin in dev so the session cookie round-trips without CORS gymnastics.

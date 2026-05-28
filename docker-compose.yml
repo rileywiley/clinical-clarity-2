@@ -1,0 +1,87 @@
+# Phase 0 dev stack. See docs/phase.md for what each service is for and what's
+# stubbed vs. live.
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clinical_clarity
+    ports:
+      # Host port 55432 to avoid colliding with Homebrew Postgres or other dev
+      # projects on 5432-5434. Container-to-container traffic still uses 5432 on the
+      # internal docker network.
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d clinical_clarity"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app_user:app_user_pw@db:5432/clinical_clarity
+      DATABASE_URL_ADMIN: postgresql+asyncpg://app_owner:app_owner_pw@db:5432/clinical_clarity
+      SESSION_SECRET: dev-only-change-me-please
+      CORS_ALLOW_ORIGINS: '["http://localhost:5173"]'
+      ENVIRONMENT: dev
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+  # Idle until Phase 5 wires the Claude SoA parser. Wiring infra now means the
+  # Phase 5 hookup is a code change, not an infra change.
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app_user:app_user_pw@db:5432/clinical_clarity
+      DATABASE_URL_ADMIN: postgresql+asyncpg://app_owner:app_owner_pw@db:5432/clinical_clarity
+      SESSION_SECRET: dev-only-change-me-please
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["sh", "-c", "echo 'arq worker idle until Phase 5'; tail -f /dev/null"]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
