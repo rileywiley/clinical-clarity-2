@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-05-28 (Phase 0 ✅ complete)
+**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 🟡 deliverables done, awaiting smoke)
 
 ## Top-level system
 
@@ -63,7 +63,20 @@ flowchart LR
   WORKER["arq worker — idle until Phase 5"]
   ALEMBIC["alembic migrations<br/>(runs as app_owner)"]
 
-  ENG["engine — placeholder, built in Phase 1"]
+  subgraph ENG["engine (pure Python — zero web/DB imports)"]
+    direction TB
+    ENG_TYPES["types: Site, Trial, Arm, Visit,<br/>AttritionCurve, EnrollmentWeek,<br/>Commitment, ForecastCell, MetricsRow"]
+    ENG_WINDOWS["windows: triangular_weights"]
+    ENG_ATTRITION["attrition: linear back-loaded survival"]
+    ENG_DURATION["duration: PRD §5.2 resolution order"]
+    ENG_FORECAST["forecast: compute_forecast"]
+    ENG_METRICS["metrics: SFR, rates, pace, health, WoW"]
+    ENG_FORECAST --> ENG_WINDOWS
+    ENG_FORECAST --> ENG_ATTRITION
+    ENG_FORECAST --> ENG_DURATION
+    ENG_FORECAST --> ENG_TYPES
+    ENG_METRICS --> ENG_TYPES
+  end
 
   Client -- "cookie auth via /api proxy" --> MAIN
   Backend -- "asyncpg as app_user" --> PG
@@ -74,7 +87,7 @@ flowchart LR
 
 ## Notes
 
-- **`engine`** has no edges yet. That is intentional — it'll connect to the backend in Phase 4 (forecast wiring). It is *not* orphaned; it is in-tree but deliberately decoupled per CLAUDE.md golden rule #2 (the engine stays pure, no web/DB/HTTP deps).
+- **`engine`** has internal structure now (forecast + metrics + helpers + types) but still no *outgoing* edges to anything outside the package — that's enforced by `tests/test_engine_purity.py` (walks every submodule and asserts no forbidden imports leaked into `sys.modules`). It'll get an *incoming* edge from the backend in Phase 4 (forecast wiring). Until then it remains in-tree but deliberately decoupled per CLAUDE.md golden rule #2.
 - **`OrgSettings`** isn't in the diagram yet because the table lands in Phase 2 (PRD §9.2). It will then become the source of every tunable default (durations, utilization thresholds, attrition curve, etc.) — read live, not snapshotted.
 - **`arq worker`** has no work yet but the container is wired so the Phase 5 hookup (Claude vision SoA parser) is a code change, not infra.
 - **Two-role DB split** (`app_owner` BYPASSRLS for Alembic, `app_user` RLS-enforced at runtime) is what makes tenant isolation auditable, not just intended.

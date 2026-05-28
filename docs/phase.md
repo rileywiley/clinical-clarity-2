@@ -8,7 +8,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | # | Phase | Status | Gate (automated) | Gate (manual) | Notes |
 |---|---|---|---|---|---|
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
-| 1 | Forecast engine (standalone) + metrics module | ⬜ | — | — | Highest-risk-first; pure Python, no UI/DB |
+| 1 | Forecast engine (standalone) + metrics module | 🟡 | ✅ | _pending_ | Started 2026-05-28 |
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ⬜ | — | — | |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ⬜ | — | — | Keyboard nav + paste are first-class acceptance criteria |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
@@ -65,3 +65,51 @@ Exercised end-to-end against a running stack on 2026-05-28:
 - Render deployment → Phase 6
 - Arq worker logic → Phase 5 (container is up but idle)
 - Browser-rendered visual smoke of the frontend login → first thing to verify at the start of Phase 1
+
+---
+
+## Phase 1 — Forecast engine + metrics 🟡
+
+**Started:** 2026-05-28
+
+### Delivered
+- `engine/types.py` — input/output dataclasses (Site, Trial, Arm, Visit, AttritionCurve, EnrollmentWeek, Commitment, OrgDurationDefaults, ForecastCell, MetricsRow, VisitType, WeekRange). All frozen, slotted, hashable; zero web/DB imports.
+- `engine/windows.py` — `triangular_weights(anchor, window_days)` and `smear_count(...)`. Discrete triangular distribution with raw weights `(W+1-|k|)` and normalizer `(W+1)²`. **Horizon policy:** full window, mass outside reported range is unreported (see [project memory](../README.md#memory) — modeling decisions).
+- `engine/attrition.py` — `survival_by_visit(visits, curve)`. Screening = 1.0 always; randomized chain decays linearly with visit index (linear back-loaded shape).
+- `engine/duration.py` — `effective_duration(visit, defaults, site_overrides)`. PRD §5.2 order: site override → visit override → org type default.
+- `engine/forecast.py` — `compute_forecast(commitments, today, horizon_end)`. PRD §6.4 pseudocode made real. Tracks each placement's anchor week for range bounds.
+- `engine/metrics.py` — `compute_metrics(...)`. SFR, screen rate, enrollment rate, pace-vs-plan, enrollment health (against both randomization + screening goals), week-over-week.
+- Tests: 30 total — 5 attrition, 4 duration, 5 windows, 1 purity, 9 forecast golden masters, 6 metrics golden masters.
+
+### Gate — automated smoke test ✅
+
+`engine/tests/` (run 2026-05-28):
+
+```
+30 passed in 0.03s
+```
+
+Forecast golden masters cover PRD §6.7's required scenarios:
+- `single_cohort_fan` — basic 1-site/1-trial/no-attrition visit fan
+- `multi_cohort_stacking` — overlapping cohorts sum cleanly
+- `survival_decay_applies_to_randomized_chain_only` — 20% Standard over 5 visits = (1.0, 0.95, 0.90, 0.85, 0.80); screening unaffected
+- `window_smearing_across_week_boundary` — visit anchored on Mon W1 with ±2-day window, mass split (3.333 to W0, 6.667 to W1) per triangular weights, **and** range bounds verified (W0 low=10 from anchored-here v0 + W1's smear contributes 0 to low; W1 low=high=6.667)
+- `screening_driven_by_screened_not_randomized` — PRD §6.2 #1 enforced: 20 screened, 8 randomized, each screening visit fires with full 20
+- `hours_and_capacity_arithmetic` — capacity = rooms × ops_days × hrs/day; utilization = demand_hours / capacity_hours
+- `revenue_is_count_times_price` — including price=None contributing 0
+- `actuals_override_when_past_week_is_in_horizon` — past cohort's downstream visits use actual count (4), not projection (10)
+- `range_bounds_collapse_with_zero_window` — invariant that point windows produce low=high=expected for every cell
+
+Metrics golden masters cover PRD §6.8:
+- SFR, screen rate, enrollment rate, pace-vs-plan, enrollment health (both goals), week-over-week
+- Edge cases: None when inputs insufficient (SFR with 0 screened)
+
+Engine purity test enforces CLAUDE.md golden rule #2: the test imports every submodule of `engine` and asserts no forbidden module is reachable in `sys.modules` (fastapi, sqlalchemy, asyncpg, httpx, app, etc.).
+
+### Gate — manual smoke ⏳ in progress
+- [ ] Walk through one tricky fixture (likely `window_smearing_across_week_boundary` or `survival_decay`) with the human to spot-check the hand-computed expected values
+
+### Modeling decisions made for this phase
+Saved to project memory and noted in the engine source:
+- **Triangular window normalization: full window, mass may fall outside.** Mass landing past the reported horizon is unreported. Consistent with PRD §6.3's conservative-on-screening posture (under-reporting at edges is safe for a don't-oversell tool).
+- **Attrition shape: linear back-loaded by visit index.** Survival decays linearly across the randomized chain so cumulative dropout at the last visit = `curve.total_dropout_pct`. Defensible and tractable for hand-computed fixtures; can be A/B-tested in v1.5 if real data argues for a different shape.

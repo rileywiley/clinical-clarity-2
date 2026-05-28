@@ -16,6 +16,8 @@ select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF"]
 ignore = [
   "E501",  # ruff format handles line length
   "B008",  # FastAPI uses Depends(...)/Cookie(...) in defaults; that's the idiom
+  "RUF002",  # Unicode ×, –, etc. are intentional in docstrings (math notation)
+  "RUF003",  # same, in comments
 ]
 
 [tool.ruff.format]
