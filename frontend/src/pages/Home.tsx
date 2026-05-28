@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api, Me } from "../api";
 
 export default function Home({ me }: { me: Me }) {
@@ -13,8 +14,16 @@ export default function Home({ me }: { me: Me }) {
     <div className="mx-auto mt-12 max-w-2xl p-6">
       <h1 className="text-2xl font-semibold">Volume Forecasting Platform</h1>
       <p className="mt-2 text-slate-600">
-        Phase 0 placeholder. The real app starts in Phase 4 (network grid).
+        Phase 3 — projections &amp; actuals grid. The forecast network grid lands in Phase 4.
       </p>
+      <nav className="mt-4 flex flex-wrap gap-3">
+        <Link
+          to="/projections"
+          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+        >
+          Open projections grid
+        </Link>
+      </nav>
       <div className="mt-6 rounded border border-slate-200 bg-white p-4">
         <p>
           Signed in as <strong>{me.name}</strong> ({me.email}) —{" "}

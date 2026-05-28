@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, api } from "./api";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
+import ProjectionGrid from "./pages/ProjectionGrid";
 
 export default function App() {
   const meQuery = useQuery({
@@ -30,6 +31,12 @@ export default function App() {
         path="/"
         element={
           isAuthed ? <Home me={meQuery.data!} /> : <Navigate to="/login" replace />
+        }
+      />
+      <Route
+        path="/projections"
+        element={
+          isAuthed ? <ProjectionGrid /> : <Navigate to="/login" replace />
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

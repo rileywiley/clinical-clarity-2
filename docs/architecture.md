@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅)
+**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 🟡 deliverables done, awaiting smoke)
 
 ## Top-level system
 
@@ -10,10 +10,16 @@ Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a modu
 flowchart LR
   subgraph Client["frontend (React+TS+Vite+Tailwind)"]
     APP[App.tsx]
-    PAGES[pages: Login, Home]
+    PAGES["pages: Login, Home, ProjectionGrid"]
     API_CLIENT[api.ts]
+    SHEET["components/SpreadsheetGrid<br/>(headless: useKeyboardNav,<br/>useClipboardPaste)"]
+    VAR["components/VarianceHint<br/>HistoryDrawer"]
+    GUARD["hooks/useUnsavedChangesGuard<br/>(useBlocker + beforeunload)"]
     APP --> PAGES
     APP --> API_CLIENT
+    PAGES --> SHEET
+    PAGES --> VAR
+    PAGES --> GUARD
   end
 
   subgraph Backend["backend (FastAPI)"]
@@ -30,6 +36,7 @@ flowchart LR
       R_TRIALS["routers.trials<br/>(CRUD + activate + arms nested)"]
       R_VISITS[routers.visits]
       R_STRIALS[routers.site_trials]
+      R_EW["routers.enrollment_weeks<br/>(bulk PUT, history, variance)"]
     end
 
     subgraph Core
@@ -51,6 +58,8 @@ flowchart LR
       M_VISIT["Visit + VisitType enum"]
       M_STRIAL[SiteTrial]
       M_STVO[SiteTrialVisitOverride]
+      M_EW[EnrollmentWeek]
+      M_EWH[EnrollmentWeekHistory]
       M_ORG --> M_BASE
       M_USER --> M_BASE
       M_ORGSET --> M_BASE
@@ -61,11 +70,15 @@ flowchart LR
       M_VISIT --> M_BASE
       M_STRIAL --> M_BASE
       M_STVO --> M_BASE
+      M_EW --> M_BASE
+      M_EWH --> M_BASE
     end
 
     subgraph Services
       SVC_RES["resolution<br/>(live-read OrgSettings → effective duration)"]
       SVC_ACT["trial_activation<br/>(draft→active validator)"]
+      SVC_AUDIT["enrollment_audit<br/>(diff projection fields, write history rows)"]
+      SVC_VAR["enrollment_variance<br/>(sum sites vs trial targets, warn-and-allow)"]
     end
 
     MAIN --> Routers
@@ -89,6 +102,14 @@ flowchart LR
     SVC_RES --> M_ORGSET
     SVC_RES --> M_VISIT
     SVC_RES --> M_STVO
+    R_EW --> SVC_AUDIT
+    R_EW --> SVC_VAR
+    SVC_AUDIT --> M_EW
+    SVC_AUDIT --> M_EWH
+    SVC_VAR --> M_EW
+    SVC_VAR --> M_TRIAL
+    R_EW --> M_EW
+    R_EW --> M_EWH
   end
 
   subgraph Data
@@ -126,7 +147,9 @@ flowchart LR
 - **`engine`** has internal structure now (forecast + metrics + helpers + types) but still no *outgoing* edges to anything outside the package — that's enforced by `tests/test_engine_purity.py` (walks every submodule and asserts no forbidden imports leaked into `sys.modules`). It'll get an *incoming* edge from the backend in Phase 4 (forecast wiring). Until then it remains in-tree but deliberately decoupled per CLAUDE.md golden rule #2.
 - **`OrgSettings`** is now wired (Phase 2). The resolution service reads it live on every call — a PATCH to its duration fields immediately re-flows to every inheriting trial/visit. Explicit overrides at the visit or site-trial level are preserved.
 - **`AttritionCurve`** is the only org-scoped table whose RLS policy admits NULL `org_id` rows (for future global seeds). No global seeds ship in v1; the column shape is in place.
-- **Service layer** (`app/services/`) is new in Phase 2. `resolution.py` is intentionally the same shape as `engine/duration.py` — Phase 4 will use it to build the `OrgDurationDefaults` dataclass that gets handed into the engine. `trial_activation.py` returns a structured failure list rather than fail-fast, so the wizard UI in Phase 5 can surface every blocker together.
+- **Service layer** (`app/services/`) is new in Phase 2. `resolution.py` is intentionally the same shape as `engine/duration.py` — Phase 4 will use it to build the `OrgDurationDefaults` dataclass that gets handed into the engine. `trial_activation.py` returns a structured failure list rather than fail-fast, so the wizard UI in Phase 5 can surface every blocker together. Phase 3 added `enrollment_audit.py` (one history row per *changed* projection field; actuals are never audited) and `enrollment_variance.py` (PRD §7.3 warn-and-allow, never blocks).
+- **SpreadsheetGrid** (frontend, Phase 3) is built generic over a row shape so the Phase 4 network grid can render its weeks-as-columns layout against the same primitive. The keyboard-nav + paste hooks (`useKeyboardNav`, `useClipboardPaste`) are headless; they own no DOM and can be tested in isolation.
+- **`useUnsavedChangesGuard`** is the project-wide form-exit guard (per saved feedback memory: every Save-button form must use it). Hooks into React Router 6's `useBlocker` for in-app navigation and `beforeunload` for tab close. Phase 5's trial setup wizard and Phase 6's admin settings page will both reuse it.
 - **`arq worker`** has no work yet but the container is wired so the Phase 5 hookup (Claude vision SoA parser) is a code change, not infra.
 - **Two-role DB split** (`app_owner` BYPASSRLS for Alembic, `app_user` RLS-enforced at runtime) is what makes tenant isolation auditable, not just intended.
 - Every domain model inherits `OrgScopedMixin` (carries `org_id`) except `Organization` itself.

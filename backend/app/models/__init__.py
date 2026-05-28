@@ -1,5 +1,6 @@
 from app.models.attrition_curve import AttritionCurve
 from app.models.base import Base, OrgScopedMixin, TimestampMixin
+from app.models.enrollment_week import EnrollmentWeek, EnrollmentWeekHistory
 from app.models.org import Organization
 from app.models.org_settings import OrgSettings
 from app.models.site import Site
@@ -12,6 +13,8 @@ __all__ = [
     "Arm",
     "AttritionCurve",
     "Base",
+    "EnrollmentWeek",
+    "EnrollmentWeekHistory",
     "OrgScopedMixin",
     "OrgSettings",
     "Organization",

@@ -10,7 +10,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
 | 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
-| 3 | Projections & actuals (TanStack spreadsheet grid) | ⬜ | — | — | Keyboard nav + paste are first-class acceptance criteria |
+| 3 | Projections & actuals (TanStack spreadsheet grid) | 🟡 | ✅ | _pending_ | Started 2026-05-28; keyboard nav + paste are first-class acceptance criteria |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
 | 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
 | 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
@@ -153,3 +153,67 @@ Engine: 30/30 tests still green — no regression in the pure forecast layer.
 
 ### Activation rule (saved as project memory)
 `draft → active` requires: ≥1 SoA visit + ≥1 randomization visit + ≥1 active SiteTrial + an attrition curve assigned. Pricing is **not** part of activation (PRD §7.1 separates "volume-ready" from "revenue-ready").
+
+---
+
+## Phase 3 — Projections & actuals 🟡
+
+**Started:** 2026-05-28
+
+### Delivered
+
+**Backend** (`/backend`):
+- `EnrollmentWeek` + `EnrollmentWeekHistory` models. Unique on `(site_id, trial_id, arm_id, week_start)`. History is append-only and audits **projection edits only** — actuals overwrite, they don't change a plan.
+- Alembic `0003_enrollment_weeks.py` with RLS policies on both tables in the same tenant-isolation pattern as Phase 2.
+- Services: `enrollment_audit.diff_projection_fields` (one history row per *changed* projection field per save), `enrollment_variance.compute_trial_variance` (sums per-site projections vs. trial targets, using actuals where past per PRD §5.3).
+- API: `GET /site-trials/{id}/enrollment-weeks?from=&to=&arm_id=` (returns rows in range, **zero-projection rows backfilled** so the frontend doesn't have to know the calendar), `PUT /site-trials/{id}/enrollment-weeks` (bulk replace, **past projection edits hard-locked with 409** + structured `offending_week_starts`), `GET /site-trials/{id}/enrollment-weeks/history`, `GET /trials/{id}/variance`. Total routes: 47.
+
+**Frontend** (`/frontend`):
+- `SpreadsheetGrid/` — generic headless spreadsheet primitive (built on TanStack Table). Generic over row shape so Phase 4's network grid can reuse it.
+  - `useKeyboardNav` — Tab / Shift-Tab / Enter / Shift-Enter / arrow keys, **skipping disabled cells during nav** (the cursor lands on the next *enabled* cell beyond the disabled one).
+  - `useClipboardPaste` — TSV parser handles Excel/Numbers/Sheets paste, strips trailing newlines + CRLF, fills a block from the active cell, **skips disabled cells during paste too**, strips thousands commas.
+  - `parseTSV` + `parseCellValue` exposed for testing independent of React.
+- `hooks/useUnsavedChangesGuard` — Uses React Router 6's `useBlocker` for in-app navigation + `beforeunload` for tab/window close. Fires browser-native confirm only when `dirty === true`. Per the saved feedback memory, every Save-button form must use this.
+- `pages/ProjectionGrid.tsx` — Trial+Site pickers, weeks-as-rows grid with Projected/Actual column groups, row classes (`past` → projection cells disabled; `current` → highlighted, both editable; `future` → actuals greyed). Horizontal divider drawn after the current-week row. Variance hint badge above the grid. "View change history" drawer.
+- `components/VarianceHint` — Inline "Randomized 87 / goal 100 · 13 under" badges; under-target shown in amber, on/over in emerald. Warn-only, never blocks.
+- `components/HistoryDrawer` — Side panel with reverse-chronological audit list.
+- Routing: `/projections` added to `App.tsx`; Home page now has a button linking there.
+
+### Gate — automated smoke test ✅
+
+```
+backend       19 passed  (12 prior + 7 new Phase 3)
+engine        30 passed  (no regression)
+frontend      21 passed  (10 paste parser + 11 SpreadsheetGrid behaviors)
+```
+
+Backend covers the load-bearing surface:
+- Bulk PUT round-trip
+- GET pads missing weeks (so the grid renders a complete calendar)
+- **Past projection edit → 409 with offending week_start** (the hard-lock assertion)
+- Past actual edit succeeds (actuals are the *point* of editing past)
+- Audit records only changed projection fields (not unchanged proj, not actuals)
+- Variance reports under-target without rejecting (warn-and-allow)
+- RLS isolation: Org B cannot read Org A's enrollment weeks or variance
+
+Frontend covers the PRD §7.3 first-class acceptance criteria:
+- Tab / Shift-Tab horizontal nav
+- Enter / Shift-Enter vertical nav
+- Arrow keys in all four directions
+- **Disabled cells skipped during keyboard nav** (cursor hops past)
+- Stops at grid edge instead of wrapping
+- TSV paste fills a 2×3 block from the active cell
+- **Disabled cells skipped during paste** (drop the value, keep going)
+- Column-group headers render
+- Disabled cells render without an input element (can't be typed into)
+- `onCellChange` fires on input change
+- Divider drawn after the configured row
+- Paste parser unit tests for TSV / CRLF / thousands commas / garbage
+
+### Gate — manual smoke ⏳ in progress
+- [ ] Bring up backend + frontend dev server, log in, open `/projections`, type into cells with the keyboard, Tab around, Enter down, arrow nav, paste a small block from a spreadsheet, edit a past actual, click Save, refresh and confirm persistence, open the history drawer, attempt to navigate away with unsaved changes (confirm prompt fires)
+
+### Save model + activation rule (saved as feedback memory)
+- **Explicit Save button** with dirty-state indicator (button label flips Save ↔ Saved).
+- **Unsaved-changes guard** fires on React Router nav + `beforeunload` when dirty. Trial/Site picker dropdowns also confirm before discarding edits.
+- Past-projection lock is a **hard 409** at the API; the UI surfaces the offending week_starts inline above the grid.
