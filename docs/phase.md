@@ -8,7 +8,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | # | Phase | Status | Gate (automated) | Gate (manual) | Notes |
 |---|---|---|---|---|---|
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
-| 1 | Forecast engine (standalone) + metrics module | 🟡 | ✅ | _pending_ | Started 2026-05-28 |
+| 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ⬜ | — | — | |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ⬜ | — | — | Keyboard nav + paste are first-class acceptance criteria |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
@@ -68,9 +68,9 @@ Exercised end-to-end against a running stack on 2026-05-28:
 
 ---
 
-## Phase 1 — Forecast engine + metrics 🟡
+## Phase 1 — Forecast engine + metrics ✅
 
-**Started:** 2026-05-28
+**Started:** 2026-05-28 · **Completed:** 2026-05-28
 
 ### Delivered
 - `engine/types.py` — input/output dataclasses (Site, Trial, Arm, Visit, AttritionCurve, EnrollmentWeek, Commitment, OrgDurationDefaults, ForecastCell, MetricsRow, VisitType, WeekRange). All frozen, slotted, hashable; zero web/DB imports.
@@ -106,8 +106,8 @@ Metrics golden masters cover PRD §6.8:
 
 Engine purity test enforces CLAUDE.md golden rule #2: the test imports every submodule of `engine` and asserts no forbidden module is reachable in `sys.modules` (fastapi, sqlalchemy, asyncpg, httpx, app, etc.).
 
-### Gate — manual smoke ⏳ in progress
-- [ ] Walk through one tricky fixture (likely `window_smearing_across_week_boundary` or `survival_decay`) with the human to spot-check the hand-computed expected values
+### Gate — manual smoke ✅
+- [x] Walked through `test_window_smearing_across_week_boundary` with the human (2026-05-28). The math (triangular weights `(1,2,3,2,1)/9` at offsets `(-2,-1,0,+1,+2)` from Mon 2026-06-08 mapping to `(Sat W0, Sun W0, Mon W1, Tue W1, Wed W1)`, so 3.333 mass to W0 and 6.667 to W1; range bounds `low=10/high=13.333` for W0 and `low=high=6.667` for W1) was confirmed correct. The hand-computed expected values in the test match the algorithm's intent.
 
 ### Modeling decisions made for this phase
 Saved to project memory and noted in the engine source:
