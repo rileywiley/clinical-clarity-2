@@ -9,7 +9,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 |---|---|---|---|---|---|
 | 0 | Foundations — monorepo, auth, multi-tenancy + RLS | ✅ | ✅ | ✅ (partial — see below) | Completed 2026-05-28 |
 | 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
-| 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | 🟡 | ✅ | _pending_ | Started 2026-05-28 |
+| 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ⬜ | — | — | Keyboard nav + paste are first-class acceptance criteria |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
 | 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
@@ -116,9 +116,9 @@ Saved to project memory and noted in the engine source:
 
 ---
 
-## Phase 2 — Core data model & CRUD 🟡
+## Phase 2 — Core data model & CRUD ✅
 
-**Started:** 2026-05-28
+**Started:** 2026-05-28 · **Completed:** 2026-05-28
 
 ### Delivered
 - Models (all org-scoped, RLS-protected unless noted): `OrgSettings`, `AttritionCurve` (org_id nullable for future global seeds; permissive policy already in place), `Site`, `Trial`, `Arm`, `Visit`, `SiteTrial`, `SiteTrialVisitOverride`.
@@ -148,8 +148,8 @@ Covers:
 
 Engine: 30/30 tests still green — no regression in the pure forecast layer.
 
-### Gate — manual smoke ⏳ in progress
-- [ ] Walk one end-to-end flow (`curl` against a running backend, the same path as the e2e test) for spot-check
+### Gate — manual smoke ✅
+- [x] Walked the full trial-setup flow via `curl` against a running backend on 2026-05-28: signup auto-seeded org settings + 3 presets (with Standard as default), site creation worked, trial creation defaulted to Standard attrition, Default Arm auto-created, pre-activation 422 surfaced both `no_visits` + `no_sites` failures together (structured failure list working), adding the 3 visits + assigning the site enabled activation (`draft → active`), PATCH OrgSettings persisted (2.0 → 3.0) without disturbing other defaults. Smoke confirms the e2e test exercises the same path correctly.
 
 ### Activation rule (saved as project memory)
 `draft → active` requires: ≥1 SoA visit + ≥1 randomization visit + ≥1 active SiteTrial + an attrition curve assigned. Pricing is **not** part of activation (PRD §7.1 separates "volume-ready" from "revenue-ready").
