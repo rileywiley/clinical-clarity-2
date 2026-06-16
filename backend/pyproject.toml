@@ -15,7 +15,14 @@ dependencies = [
   "itsdangerous>=2.2",
   "python-multipart>=0.0.12",
   "email-validator>=2.2",
+  # The /engine package, local editable. CLAUDE.md golden rule #2 keeps the
+  # engine pure (no web/DB imports); the backend's forecast/metrics adapters
+  # are the only place engine talks to DB-shaped data.
+  "engine",
 ]
+
+[tool.uv.sources]
+engine = { path = "../engine", editable = true }
 
 [dependency-groups]
 dev = [

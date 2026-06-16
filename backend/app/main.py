@@ -6,6 +6,7 @@ from app.routers import (
     attrition_curves,
     auth,
     enrollment_weeks,
+    forecast,
     health,
     org_settings,
     orgs,
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(visits.router)
     app.include_router(site_trials.router)
     app.include_router(enrollment_weeks.router)
+    app.include_router(forecast.router)
     return app
 
 

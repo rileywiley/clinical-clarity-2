@@ -58,6 +58,7 @@ export type TrialOut = {
   fpfv: string;
   lpfv: string;
   lplv: string;
+  is_multi_arm: boolean;
   enrollment_target: number;
   screening_target: number;
   attrition_curve_id: string | null;
@@ -109,6 +110,51 @@ export type EnrollmentWeekIn = {
   actual_randomized: number | null;
 };
 
+// --- Phase 4: forecast + metrics ---------------------------------------
+
+export type ForecastCellOut = {
+  site_id: string;
+  week_start: string;
+  visits_by_type: Record<string, number>;
+  visits_by_trial: Record<string, number>;
+  demand_hours: number;
+  capacity_hours: number;
+  utilization: number | null;
+  revenue: number;
+  week_range: { low_count: number; high_count: number };
+};
+
+export type DailyVisitsOut = {
+  day: string;
+  visits_by_type: Record<string, number>;
+  demand_hours: number;
+  capacity_hours: number;
+  utilization: number | null;
+};
+
+export type MetricsRowOut = {
+  screened: number;
+  randomized: number;
+  screen_fail_rate: number | null;
+  screen_rate: number | null;
+  enrollment_rate: number | null;
+  pace_vs_plan: number | null;
+  enrollment_health_randomized: number | null;
+  enrollment_health_screened: number | null;
+  wow_screened: number | null;
+  wow_randomized: number | null;
+};
+
+export type TrialMetricsOut = {
+  trial_id: string;
+  trial_name: string;
+  randomization_target: number;
+  screening_target: number;
+  metrics: MetricsRowOut;
+};
+
+export type ActiveTrialOut = { id: string; name: string };
+
 export const api = {
   me: () => request<Me>("/auth/me"),
   login: (email: string, password: string, org_id: string) =>
@@ -151,4 +197,57 @@ export const api = {
 
   getTrialVariance: (trialId: string) =>
     request<TrialVarianceOut>(`/trials/${trialId}/variance`),
+
+  // Phase 4 — forecast + metrics
+  networkForecast: (from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    return request<ForecastCellOut[]>(
+      `/forecast/network${qs.toString() ? "?" + qs : ""}`,
+    );
+  },
+  siteForecast: (siteId: string, from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    return request<ForecastCellOut[]>(
+      `/sites/${siteId}/forecast${qs.toString() ? "?" + qs : ""}`,
+    );
+  },
+  trialForecast: (trialId: string, from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to) qs.set("to", to);
+    return request<ForecastCellOut[]>(
+      `/trials/${trialId}/forecast${qs.toString() ? "?" + qs : ""}`,
+    );
+  },
+  siteCalendar: (siteId: string, month: string) =>
+    request<DailyVisitsOut[]>(
+      `/sites/${siteId}/forecast/calendar?month=${month}`,
+    ),
+  trialMetrics: (
+    trialId: string,
+    window_start?: string,
+    window_end?: string,
+    site_id?: string,
+  ) => {
+    const qs = new URLSearchParams();
+    if (window_start) qs.set("window_start", window_start);
+    if (window_end) qs.set("window_end", window_end);
+    if (site_id) qs.set("site_id", site_id);
+    return request<TrialMetricsOut>(
+      `/trials/${trialId}/metrics${qs.toString() ? "?" + qs : ""}`,
+    );
+  },
+  siteMetrics: (siteId: string, window_start?: string, window_end?: string) => {
+    const qs = new URLSearchParams();
+    if (window_start) qs.set("window_start", window_start);
+    if (window_end) qs.set("window_end", window_end);
+    return request<TrialMetricsOut[]>(
+      `/sites/${siteId}/metrics${qs.toString() ? "?" + qs : ""}`,
+    );
+  },
+  listActiveTrials: () => request<ActiveTrialOut[]>("/active-trials"),
 };

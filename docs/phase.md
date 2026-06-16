@@ -11,7 +11,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 1 | Forecast engine (standalone) + metrics module | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
-| 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ⬜ | — | — | |
+| 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
 | 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
 | 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
 
@@ -228,3 +228,64 @@ Driven end-to-end by `frontend/e2e/phase3-smoke.spec.ts` (Playwright + real Chro
 - **Explicit Save button** with dirty-state indicator (button label flips Save ↔ Saved).
 - **Unsaved-changes guard** fires on React Router nav + `beforeunload` when dirty. Trial/Site picker dropdowns also confirm before discarding edits.
 - Past-projection lock is a **hard 409** at the API; the UI surfaces the offending week_starts inline above the grid.
+
+---
+
+## Phase 4 — Forecast wiring & views ✅
+
+**Started:** 2026-06-16 · **Completed:** 2026-06-16
+
+### Delivered
+
+**Backend** (`/backend`):
+- `app/services/forecast_adapter.py` — the **only** module that touches both DB and engine. `build_commitments(db, org_id, ...)` reads Site / Trial / Arm / Visit / AttritionCurve / EnrollmentWeek / OrgSettings / SiteTrial / SiteTrialVisitOverride from Postgres and constructs `engine.types.Commitment` tuples. `compute_network_forecast(...)` calls into the engine. CLAUDE.md golden rule #2 still holds — the engine itself never grew a DB import; `test_engine_purity` still passes.
+- `app/services/metrics_adapter.py` — DB → engine bridge for the §6.8 enrollment metrics.
+- `engine/forecast.py` gained `compute_daily_forecast(commitments, site_id, day_start, day_end)` + a `DailyCell` dataclass to drive the calendar heatmap (PRD §8.5). The weekly aggregation path is unchanged.
+- 7 new endpoints in `app/routers/forecast.py`: `GET /forecast/network`, `GET /sites/{id}/forecast`, `GET /sites/{id}/forecast/calendar?month=YYYY-MM`, `GET /trials/{id}/forecast`, `GET /trials/{id}/metrics`, `GET /sites/{id}/metrics`, `GET /active-trials` (the lightweight list used by the network legend; lives at `/active-trials` not `/trials/active` to avoid being shadowed by `/trials/{trial_id}` which would try to parse "active" as a UUID — caught during smoke).
+- Engine installed as a uv editable dep on the backend (`backend/pyproject.toml` `[tool.uv.sources]`).
+
+**Frontend** (`/frontend`):
+- 5 new pages:
+  - `pages/NetworkGrid.tsx` (PRD §8.1) — the new landing at `/`. Sites × weeks grid, cells colored by utilization band (green ≤ 70% / amber ≤ 95% / red ≤ 100% / **critical red > 100%** to "read loudly"). Thresholds read live from `OrgSettings`. KPI strip (active sites, forecast revenue, avg utilization, **sites at risk** in danger color). Click row label or cell → `/sites/:id`.
+  - `pages/SiteChart.tsx` (PRD §8.2) — Recharts stacked area, y = room-hours/week, flat capacity reference line, dashed "now" marker. **Stack by Trial / Stack by Visit type** toggle, state persists in `localStorage`. KPI strip: current util, active trials, **projected overage** (first future week demand > capacity), forecast revenue.
+  - `pages/TrialDetail.tsx` (PRD §8.3) — read-only deep drill. Trial metadata + KPI strip (SFR, pace, randomization health, revenue) + that trial's forecast-contribution area chart + SoA table + assigned sites table.
+  - `pages/Metrics.tsx` (PRD §8.4) — study-level metrics table: SFR, screen rate, enrollment rate, pace vs plan, enrollment health vs both goals, week-over-week. Click a trial → trial detail.
+  - `pages/SiteCalendar.tsx` (PRD §8.5) — month-grid heatmap. Each day cell colored by daily utilization band. Month nav (prev/next). Click a day → expandable panel with visit-type breakdown.
+- `components/AppShell.tsx` — top bar with user identity + sign out, wraps every authed page.
+- `components/KpiStrip.tsx` — generic top-of-page KPI tiles with `default` / `warning` / `danger` palettes.
+- `components/TrialColorBadge.tsx` — chip showing a trial's persistent color + name.
+- `lib/trialColors.ts` — **deterministic** djb2 hash of `trial_id` → one of 12 palette colors. Same color across users, sessions, browsers, views.
+- `lib/utilization.ts` — `classifyUtil(util, thresholds)` returns `green | amber | red | critical | none`. Pure function, unit-tested.
+- `lib/formatters.ts` — USD / percent / hours / count / month-day formatters.
+- Routing: `/` (NetworkGrid, was Home), `/projections` (unchanged), `/metrics`, `/sites/:siteId`, `/sites/:siteId/calendar`, `/trials/:trialId`. The standalone "Home" page is removed; AppShell handles the user identity bar.
+
+### Gate — automated smoke test ✅
+
+```
+backend       25 passed  (19 prior + 6 new Phase 4)
+engine        30 passed  (no regression — purity test still green)
+frontend      35 passed  (21 prior + 14 new for trialColors, utilization, formatters)
+```
+
+The load-bearing Phase 4 assertion is `test_db_fed_forecast_matches_engine_golden_values`: persist a known commitment in Postgres mirroring the engine's `single_cohort_fan` golden master, run the adapter, assert the resulting `ForecastCell` values match the hand-computed expected (W0: 10 randomization visits, 40 demand hours, 0.40 util; W1/W2: 10 follow-ups each, 20 demand hours, 0.20 util; capacity 100 hr). If this passes and the engine masters still pass, the wiring is faithful to the math.
+
+Additional backend coverage: GET /forecast/network shape, GET /sites/:id/forecast scoping, GET /trials/:id/metrics, GET /sites/:id/forecast/calendar (June 1 has the randomization peak, June 6 Saturday has capacity 0 and util null), RLS cross-org isolation.
+
+### Gate — manual smoke ✅
+
+Driven end-to-end by `frontend/e2e/phase4-smoke.spec.ts` (Playwright + real Chromium) on 2026-06-16. Multi-trial dataset seeded (2 trials × 2 sites × 4 future weeks). Screenshots captured in `frontend/e2e/screenshots/` (gitignored).
+
+- [x] Network grid renders with all 4 KPI tiles (active sites, $forecast revenue, avg util %, sites at risk in **danger red**) and the sites × weeks grid with proper utilization color bands. Boston has cells progressing **green → amber 92% → red 97% → critical 106% (deep red, "reads loudly")**. Click handlers wired to drill down.
+- [x] Per-site chart loads with KPI strip showing **"Projected overage Jul 6"** (the first future week demand > capacity — exactly PRD §8.2's spec). Stack-by-trial and stack-by-visit-type toggle works; persisting in localStorage. Stack-by-type view shows beautiful 3-band area (Screening cyan / Randomization blue / Follow-up green) climbing toward the 100-hr capacity line.
+- [x] Trial detail shows trial metadata, persistent purple color badge, "active" status pill, KPI strip (Rand. health 32%, $41,920 revenue), trial contribution area chart, SoA table (4 visits, prices), assigned sites table.
+- [x] Metrics page shows both trials in their persistent colors with Rand. health (32% / 40%) and Screen health (38.4% / 48%) computed from the engine.
+- [x] Calendar heatmap: June 2026 month grid with weekday/weekend layout, every operating day shows util band + percent. June 22 and June 29 show **460% deep red** — the randomization peak for both seeded cohorts converging on those Mondays. Weekend days correctly carry capacity = 0 and render greyed.
+
+**Caught and fixed during smoke:**
+1. `/trials/active` was being shadowed by `/trials/{trial_id}` (FastAPI matches the parameterized route first and tries to parse "active" as a UUID). Renamed the listing endpoint to `/active-trials`.
+2. The Metrics page's loading guard only checked `trialsQ.isLoading`, not the dependent per-trial `metricsQ` fetches — so the page briefly rendered an empty table before the metrics arrived. Now waits for both.
+
+### Phase 4 modeling notes
+- **Trial colors are deterministic** (djb2 hash of UUID → fixed 12-color palette). No DB column needed; collisions only matter at high trial counts. Future override path: add a `Trial.color` column in v1.5 and have `trialColor()` prefer it.
+- **Stack-by toggle persists** in `localStorage` under `siteChart.stackBy`. Survives page reloads but is per-browser, not per-user. Phase 6 polish could promote it to a `UserPreference` table.
+- **No forecast cache** in v1 (PRD §5.1 calls it optional). Engine + adapter run in ~50ms for the seeded smoke dataset; compute-on-demand is fine until measured otherwise.

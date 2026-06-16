@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-05-28 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅)
+**Last refreshed:** 2026-06-16 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ — engine now wired to backend via forecast_adapter)
 
 ## Top-level system
 
@@ -10,16 +10,22 @@ Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a modu
 flowchart LR
   subgraph Client["frontend (React+TS+Vite+Tailwind)"]
     APP[App.tsx]
-    PAGES["pages: Login, Home, ProjectionGrid"]
+    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics"]
+    SHELL["components/AppShell<br/>(top bar w/ user + sign out)"]
     API_CLIENT[api.ts]
     SHEET["components/SpreadsheetGrid<br/>(headless: useKeyboardNav,<br/>useClipboardPaste)"]
     VAR["components/VarianceHint<br/>HistoryDrawer"]
+    KPI["components/KpiStrip<br/>TrialColorBadge"]
     GUARD["hooks/useUnsavedChangesGuard<br/>(useBlocker + beforeunload)"]
-    APP --> PAGES
+    LIB["lib/trialColors (djb2 hash → palette)<br/>lib/utilization (band classifier)<br/>lib/formatters"]
+    APP --> SHELL
+    SHELL --> PAGES
     APP --> API_CLIENT
     PAGES --> SHEET
     PAGES --> VAR
+    PAGES --> KPI
     PAGES --> GUARD
+    PAGES --> LIB
   end
 
   subgraph Backend["backend (FastAPI)"]
@@ -37,6 +43,7 @@ flowchart LR
       R_VISITS[routers.visits]
       R_STRIALS[routers.site_trials]
       R_EW["routers.enrollment_weeks<br/>(bulk PUT, history, variance)"]
+      R_FC["routers.forecast<br/>(network, site, trial, calendar, metrics,<br/>active-trials)"]
     end
 
     subgraph Core
@@ -79,6 +86,8 @@ flowchart LR
       SVC_ACT["trial_activation<br/>(draft→active validator)"]
       SVC_AUDIT["enrollment_audit<br/>(diff projection fields, write history rows)"]
       SVC_VAR["enrollment_variance<br/>(sum sites vs trial targets, warn-and-allow)"]
+      SVC_FA["forecast_adapter<br/>(DB → Commitment → engine)"]
+      SVC_MA["metrics_adapter<br/>(DB → engine.compute_metrics)"]
     end
 
     MAIN --> Routers
@@ -110,6 +119,20 @@ flowchart LR
     SVC_VAR --> M_TRIAL
     R_EW --> M_EW
     R_EW --> M_EWH
+    R_FC --> SVC_FA
+    R_FC --> SVC_MA
+    SVC_FA --> M_SITE
+    SVC_FA --> M_TRIAL
+    SVC_FA --> M_ARM
+    SVC_FA --> M_VISIT
+    SVC_FA --> M_CURVE
+    SVC_FA --> M_EW
+    SVC_FA --> M_ORGSET
+    SVC_FA --> M_STRIAL
+    SVC_FA --> M_STVO
+    SVC_MA --> M_EW
+    SVC_MA --> M_TRIAL
+    SVC_MA --> M_STRIAL
   end
 
   subgraph Data
@@ -126,7 +149,7 @@ flowchart LR
     ENG_WINDOWS["windows: triangular_weights"]
     ENG_ATTRITION["attrition: linear back-loaded survival"]
     ENG_DURATION["duration: PRD §5.2 resolution order"]
-    ENG_FORECAST["forecast: compute_forecast"]
+    ENG_FORECAST["forecast: compute_forecast + compute_daily_forecast"]
     ENG_METRICS["metrics: SFR, rates, pace, health, WoW"]
     ENG_FORECAST --> ENG_WINDOWS
     ENG_FORECAST --> ENG_ATTRITION
@@ -134,6 +157,9 @@ flowchart LR
     ENG_FORECAST --> ENG_TYPES
     ENG_METRICS --> ENG_TYPES
   end
+
+  SVC_FA -- "feeds Commitment dataclasses" --> ENG_FORECAST
+  SVC_MA -- "feeds EnrollmentWeek dataclasses" --> ENG_METRICS
 
   Client -- "cookie auth via /api proxy" --> MAIN
   Backend -- "asyncpg as app_user" --> PG
@@ -144,11 +170,13 @@ flowchart LR
 
 ## Notes
 
-- **`engine`** has internal structure now (forecast + metrics + helpers + types) but still no *outgoing* edges to anything outside the package — that's enforced by `tests/test_engine_purity.py` (walks every submodule and asserts no forbidden imports leaked into `sys.modules`). It'll get an *incoming* edge from the backend in Phase 4 (forecast wiring). Until then it remains in-tree but deliberately decoupled per CLAUDE.md golden rule #2.
+- **`engine`** is now wired (Phase 4) via `forecast_adapter` and `metrics_adapter`. The engine still has **no outgoing edges** outside the package — that's enforced by `tests/test_engine_purity.py`, which still passes after wiring. CLAUDE.md golden rule #2 holds. The adapters are the *only* modules that touch both worlds: they read SQLAlchemy ORM objects from Postgres, convert them to the engine's plain frozen dataclasses (`Commitment`, `EnrollmentWeek`, etc.), and hand them to the engine.
 - **`OrgSettings`** is now wired (Phase 2). The resolution service reads it live on every call — a PATCH to its duration fields immediately re-flows to every inheriting trial/visit. Explicit overrides at the visit or site-trial level are preserved.
 - **`AttritionCurve`** is the only org-scoped table whose RLS policy admits NULL `org_id` rows (for future global seeds). No global seeds ship in v1; the column shape is in place.
 - **Service layer** (`app/services/`) is new in Phase 2. `resolution.py` is intentionally the same shape as `engine/duration.py` — Phase 4 will use it to build the `OrgDurationDefaults` dataclass that gets handed into the engine. `trial_activation.py` returns a structured failure list rather than fail-fast, so the wizard UI in Phase 5 can surface every blocker together. Phase 3 added `enrollment_audit.py` (one history row per *changed* projection field; actuals are never audited) and `enrollment_variance.py` (PRD §7.3 warn-and-allow, never blocks).
-- **SpreadsheetGrid** (frontend, Phase 3) is built generic over a row shape so the Phase 4 network grid can render its weeks-as-columns layout against the same primitive. The keyboard-nav + paste hooks (`useKeyboardNav`, `useClipboardPaste`) are headless; they own no DOM and can be tested in isolation.
+- **SpreadsheetGrid** (frontend, Phase 3) is built generic over a row shape. Phase 4's NetworkGrid uses a purpose-built `<table>` instead — sites-as-rows × weeks-as-columns with hover tooltips and click-to-drill was different enough that a dedicated component was clearer than over-loading the spreadsheet primitive. Both serve different needs; both are well-tested.
+- **Trial colors are deterministic** (`lib/trialColors.ts`, djb2 hash of `trial_id` → fixed 12-color palette). Same color everywhere — network legend, per-site chart series, trial-detail header, metrics-page badges. No DB column needed.
+- **`/active-trials`** lives at the top level, **not** at `/trials/active`. FastAPI matches `/trials/{trial_id}` first and would try to parse "active" as a UUID. Caught during Phase 4 smoke; named to be self-documenting.
 - **`useUnsavedChangesGuard`** is the project-wide form-exit guard (per saved feedback memory: every Save-button form must use it). Hooks into React Router 6's `useBlocker` for in-app navigation and `beforeunload` for tab close. Phase 5's trial setup wizard and Phase 6's admin settings page will both reuse it.
 - **`arq worker`** has no work yet but the container is wired so the Phase 5 hookup (Claude vision SoA parser) is a code change, not infra.
 - **Two-role DB split** (`app_owner` BYPASSRLS for Alembic, `app_user` RLS-enforced at runtime) is what makes tenant isolation auditable, not just intended.

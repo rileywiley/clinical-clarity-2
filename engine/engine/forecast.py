@@ -46,6 +46,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from datetime import date, timedelta
 
+from dataclasses import dataclass
+
 from engine.attrition import survival_by_visit
 from engine.duration import effective_duration
 from engine.types import (
@@ -58,6 +60,21 @@ from engine.types import (
     WeekRange,
 )
 from engine.windows import triangular_weights
+
+
+@dataclass(frozen=True, slots=True)
+class DailyCell:
+    """One (site, day) of forecast output. Drives the calendar heatmap
+    (PRD §8.5). Capacity per day is uniform across the site's operating days;
+    non-operating days carry capacity_hours = 0 and utilization = None.
+    """
+
+    site_id: str
+    day: date
+    visits_by_type: dict[VisitType, float]
+    demand_hours: float
+    capacity_hours: float
+    utilization: float | None
 
 
 def _site_local_week_start(d: date) -> date:
@@ -269,5 +286,91 @@ def compute_forecast(
                 week_range=WeekRange(low_count=low_total, high_count=expected_total),
             )
             week_monday += timedelta(days=7)
+
+    return out
+
+
+def compute_daily_forecast(
+    commitments: Iterable[Commitment],
+    site_id: str,
+    day_start: date,
+    day_end: date,
+) -> dict[date, DailyCell]:
+    """Daily aggregation for one site, used by the calendar heatmap view
+    (PRD §8.5).
+
+    Same input shape as ``compute_forecast`` — caller can hand in the same
+    commitment list. Returns one cell per day in ``[day_start, day_end]``
+    inclusive. Non-operating days carry zero visits, zero capacity, and
+    utilization = None.
+    """
+    commitments = [c for c in commitments if c.site.id == site_id]
+    if not commitments:
+        return {}
+
+    site = commitments[0].site
+    org_defaults = commitments[0].org_duration_defaults
+
+    daily_total: dict[date, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    visit_catalog: dict[str, Visit] = {}
+
+    for c in commitments:
+        survival = survival_by_visit(c.arm.visits, c.trial.attrition)
+        earliest_screen_off = _earliest_screening_offset(c.arm.visits)
+
+        for w in c.enrollment_weeks:
+            screened, randomized = _effective(w, day_start)
+            for v in c.arm.visits:
+                visit_catalog[v.id] = v
+                if v.visit_type is VisitType.SCREENING:
+                    base = screened
+                    surv = 1.0
+                    anchor = _screening_anchor(
+                        w.week_start, c.site.operating_weekdays, v, earliest_screen_off
+                    )
+                else:
+                    base = randomized
+                    surv = survival[v.id]
+                    anchor = _randomization_anchor(
+                        w.week_start, c.site.operating_weekdays, v
+                    )
+                count = base * surv
+                if count == 0.0:
+                    continue
+                for day, weight in triangular_weights(anchor, v.window_days).items():
+                    daily_total[day][v.id] += count * weight
+
+    # Gather per-site overrides for duration resolution.
+    all_overrides = tuple(o for c in commitments for o in c.visit_overrides)
+
+    # Per-day capacity: 1 day's worth of capacity if the day is an operating
+    # weekday, else 0. Site.operating_weekdays uses Python's weekday() (Mon=0).
+    daily_capacity = site.rooms * site.hours_per_day
+
+    out: dict[date, DailyCell] = {}
+    cursor = day_start
+    while cursor <= day_end:
+        is_op_day = cursor.weekday() in site.operating_weekdays
+        capacity = daily_capacity if is_op_day else 0.0
+
+        visits_by_type: dict[VisitType, float] = defaultdict(float)
+        demand_hours = 0.0
+        day_visits = daily_total.get(cursor, {})
+        for vid, count in day_visits.items():
+            v = visit_catalog[vid]
+            dur = effective_duration(v, org_defaults, all_overrides)
+            visits_by_type[v.visit_type] += count
+            demand_hours += count * dur
+
+        util = demand_hours / capacity if capacity > 0 else None
+        out[cursor] = DailyCell(
+            site_id=site_id,
+            day=cursor,
+            visits_by_type=dict(visits_by_type),
+            demand_hours=demand_hours,
+            capacity_hours=capacity,
+            utilization=util,
+        )
+        cursor += timedelta(days=1)
 
     return out

@@ -9,6 +9,7 @@ Public surface:
 - All input/output types from ``engine.types``
 """
 
+from engine.forecast import DailyCell
 from engine.types import (
     Arm,
     AttritionCurve,
@@ -31,6 +32,7 @@ __all__ = [
     "Arm",
     "AttritionCurve",
     "Commitment",
+    "DailyCell",
     "EnrollmentWeek",
     "ForecastCell",
     "MetricsRow",
