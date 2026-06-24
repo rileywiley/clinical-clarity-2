@@ -38,6 +38,32 @@ class Settings(BaseSettings):
 
     environment: str = "dev"
 
+    # --- S3 / object storage (Phase 5) ---------------------------------
+    # The same boto3 / aiobotocore client serves prod (AWS S3) and dev (MinIO);
+    # only the endpoint URL changes. Leave s3_endpoint_url empty to use AWS's
+    # default endpoint.
+    s3_endpoint_url: str | None = Field(
+        default="http://localhost:9000",
+        description="S3 endpoint URL. None = AWS default; set to MinIO URL in dev.",
+    )
+    s3_region: str = Field(default="us-east-1")
+    s3_access_key_id: str = Field(default="vfp_dev_access")
+    s3_secret_access_key: str = Field(default="vfp_dev_secret")
+    s3_bucket: str = Field(
+        default="vfp-documents",
+        description="Bucket name. Same bucket for all orgs; objects are keyed by org_id/...",
+    )
+
+    # --- Anthropic / Claude (Phase 5) ----------------------------------
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description="Live API key for Claude SoA parsing. Tests inject a mock client; only the manual smoke needs a real key.",
+    )
+    anthropic_model_id: str = Field(default="claude-opus-4-7")
+
+    # --- Background worker (Phase 5) -----------------------------------
+    redis_url: str = Field(default="redis://localhost:6379")
+
 
 @lru_cache
 def get_settings() -> Settings:

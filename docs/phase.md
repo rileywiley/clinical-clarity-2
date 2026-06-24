@@ -12,7 +12,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
-| 5 | Trial setup wizard + AI SoA parsing | ⬜ | — | — | Claude API (vision) |
+| 5 | Trial setup wizard + AI SoA parsing | 🟡 | ✅ | _pending_ | Started 2026-06-24 |
 | 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
 
 ---
@@ -289,3 +289,70 @@ Driven end-to-end by `frontend/e2e/phase4-smoke.spec.ts` (Playwright + real Chro
 - **Trial colors are deterministic** (djb2 hash of UUID → fixed 12-color palette). No DB column needed; collisions only matter at high trial counts. Future override path: add a `Trial.color` column in v1.5 and have `trialColor()` prefer it.
 - **Stack-by toggle persists** in `localStorage` under `siteChart.stackBy`. Survives page reloads but is per-browser, not per-user. Phase 6 polish could promote it to a `UserPreference` table.
 - **No forecast cache** in v1 (PRD §5.1 calls it optional). Engine + adapter run in ~50ms for the seeded smoke dataset; compute-on-demand is fine until measured otherwise.
+
+---
+
+## Phase 5 — Trial setup wizard + AI SoA parsing 🟡
+
+**Started:** 2026-06-24
+
+### Delivered
+
+**Backend** (`/backend`):
+- 2 new models + 2 migrations:
+  - `Document` (uploaded protocol PDF, S3-backed via opaque `storage_key`) + `0004` migration with RLS
+  - `SoaParseJob` (per-document parse run; `parsed_visits` in JSONB until user confirms — PRD §10.2 mitigation) + `0004`
+  - `Visit.confidence` + `Visit.flagged_reason` columns + `0005` migration (both nullable; NULL = human-entered/pre-AI)
+- **S3 abstraction** (`app/storage/__init__.py`) — single module, `aiobotocore`-based. Same code path serves AWS S3 in prod and **MinIO** in dev. `docker-compose.yml` adds a MinIO container + a one-shot `minio-init` container that creates the dev bucket.
+- **arq worker activated**: `app/worker/__init__.py` (`WorkerSettings`) + `app/worker/soa_parser.py` (`parse_soa` job). The worker was provisioned-but-idle since Phase 0; it now runs `arq app.worker.WorkerSettings` in docker-compose.
+- **Claude wrapper** (`app/services/claude_soa.py`) — the only place that holds the SoA parser system prompt. Versioned via `PROMPT_VERSION` so stored jobs can be replayed against later prompt revisions. Uses `claude-opus-4-7` with vision (base64 `document` block), adaptive thinking, prompt caching on the system prompt (5-min TTL by default), and `messages.parse()` with a Pydantic schema for structured output. The Anthropic client is dependency-injected so tests pass a mock.
+- 7 new endpoints in `app/routers/documents.py`:
+  - `POST /trials/{id}/documents` (multipart upload → S3 + enqueue job)
+  - `GET /documents/{id}`
+  - `GET /trials/{id}/parse-jobs` and `GET /parse-jobs/{id}` (frontend polls these)
+  - `GET /parse-jobs/{id}/parsed-visits` (the editable review payload)
+  - **`POST /parse-jobs/{id}/apply`** — the *only* path where parser output transitions from proposed (JSONB) to committed (Visit rows). PRD §10.2 mitigation enforced structurally.
+  - `POST /parse-jobs/{id}/discard`
+- Backend pyproject adds `aiobotocore`, `arq`, `anthropic`. Total backend routes: 56 (7 new).
+
+**Frontend** (`/frontend`):
+- `pages/TrialWizard.tsx` at `/trials/new` — 6-step wizard, URL-driven (`?step=basics|soa|sites|pricing|attrition|activate&trialId=...`), resumable from any step after Basics saves the trial. Progress strip with click-to-jump on reachable steps. `useUnsavedChangesGuard` on Basics + Pricing steps.
+- `components/SoaReviewTable.tsx` — editable list of parsed visits with confidence bands (green ≥0.85 / amber 0.6–0.85 / **red <0.6 = blocking**). Red rows must be touched before Confirm becomes enabled; touching clears the block. User edits override Claude's originals.
+- API client adds: `createTrial`, `patchTrial`, `activateTrial`, `listVisits`/`createVisit`/`patchVisit`/`deleteVisit`, `assignSiteToTrial`, `listAttritionCurves`, `uploadDocument` (multipart), `getParseJob`/`getParsedVisits`, `applyParseJob`/`discardParseJob`.
+- Routing: `/trials/new` mounted; Network grid header gains a `+ New trial` button.
+
+### Gate — automated smoke test ✅
+
+```
+backend       37 passed  (25 prior + 12 new Phase 5)
+engine        30 passed  (no regression)
+frontend      42 passed  (35 prior + 7 new SoaReviewTable)
+```
+
+**The load-bearing Phase 5 assertions** (PRD §10.2 mitigation):
+
+- `test_apply_writes_visits_to_arm` — proves parsed_visits transition from JSONB → real Visit rows **only** through the apply endpoint. Pre-apply: GET `/arms/:id/visits` is empty. Post-apply: visits exist and **reflect the user's edits**, not Claude's originals.
+- `test_apply_works_without_re_calling_claude` — patches `claude_soa.parse_async` to throw if called. Apply still succeeds. Proves `parsed_visits` JSONB is the durable artifact; the apply path is pure DB-write.
+- `test_discard_does_not_write_visits` — confirms discard is a no-op on Visit rows.
+- `test_parse_sync_passes_system_with_cache_control` — confirms the system prompt is sent with `cache_control: {type: ephemeral}` so subsequent parses in the same session hit the cached prefix at ~0.1× cost.
+- `test_parse_sync_uses_opus_4_7_with_adaptive_thinking` — locks in the model + thinking config.
+- RLS isolation on documents + parse jobs (Org B cannot read Org A's).
+
+**Frontend assertions** (PRD §10.2 user-facing surface):
+
+- `test colors rows by their original confidence band` — bands map to the right palette
+- `test blocks Confirm while any red row is untouched` — load-bearing UI gate
+- `test unblocks Confirm once every red row has been touched` — touching clears block
+- `test passes the user-edited visits (not the originals) to onConfirm` — proves the review is what gets sent
+- `test lets the user remove a row` — removing a red row also unblocks
+
+### Gate — manual smoke ⏳ in progress
+- [ ] Set `ANTHROPIC_API_KEY` in `.env`; bring up `docker compose up`; upload a real protocol PDF via the wizard; watch the parse run; review and correct any flagged rows; complete the wizard through to Activate; confirm the trial appears in the network grid.
+
+### Phase 5 design notes
+- **Parsed visits stay in JSONB until apply.** PRD §10.2 mitigation. There is no "pending Visit row" intermediate state — the engine literally cannot see unconfirmed AI output.
+- **`raw_output` is preserved.** Full Claude response stored on `SoaParseJob.raw_output` so a stored job can be re-applied (or replayed against a newer prompt revision) without re-billing the API.
+- **MinIO for dev, AWS S3 for prod.** Same `aiobotocore` code path; only the endpoint URL differs. Bucket created idempotently at boot by the `minio-init` one-shot container.
+- **Prompt caching on the system prompt.** Single `cache_control` breakpoint on the cached system block. Per the `claude-api` skill: render order is tools → system → messages, and the SoA prompt is large enough (~1.5K tokens) to be worth caching.
+- **Tests mock the Anthropic client.** Automated suite never burns API credits. The manual smoke is the only place a real key is needed.
+- **20 MB upload cap.** Real protocols are typically <5 MB; anything larger is likely a mistake (scanned-image PDF) and would slow Claude. The frontend reflects this in the upload hint.

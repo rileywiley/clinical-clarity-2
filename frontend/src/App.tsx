@@ -8,6 +8,7 @@ import ProjectionGrid from "./pages/ProjectionGrid";
 import SiteChart from "./pages/SiteChart";
 import SiteCalendar from "./pages/SiteCalendar";
 import TrialDetail from "./pages/TrialDetail";
+import TrialWizard from "./pages/TrialWizard";
 import Metrics from "./pages/Metrics";
 
 export default function App() {
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/metrics" element={<Metrics />} />
         <Route path="/sites/:siteId" element={<SiteChart />} />
         <Route path="/sites/:siteId/calendar" element={<SiteCalendar />} />
+        <Route path="/trials/new" element={<TrialWizard />} />
         <Route path="/trials/:trialId" element={<TrialDetail />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -16,8 +16,10 @@ select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF"]
 ignore = [
   "E501",  # ruff format handles line length
   "B008",  # FastAPI uses Depends(...)/Cookie(...) in defaults; that's the idiom
-  "RUF002",  # Unicode ×, –, etc. are intentional in docstrings (math notation)
+  "RUF001",  # Unicode ×, –, etc. are intentional in string literals (the SoA prompt)
+  "RUF002",  # same, in docstrings (math notation)
   "RUF003",  # same, in comments
+  "RUF012",  # arq WorkerSettings declares functions=[] at class scope; that's the framework's idiom
 ]
 
 [tool.ruff.format]

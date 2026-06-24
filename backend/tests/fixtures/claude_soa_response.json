@@ -1,0 +1,20 @@
+{
+  "id": "msg_test_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-7",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"visits\":[{\"name\":\"Screening\",\"visit_type\":\"screening\",\"target_day_offset\":-14,\"window_days\":3,\"confidence\":0.95,\"flagged_reason\":null},{\"name\":\"Randomization\",\"visit_type\":\"randomization\",\"target_day_offset\":0,\"window_days\":0,\"confidence\":0.99,\"flagged_reason\":null},{\"name\":\"Week 4 Follow-up\",\"visit_type\":\"follow_up\",\"target_day_offset\":28,\"window_days\":3,\"confidence\":0.90,\"flagged_reason\":null},{\"name\":\"PK Sub-study Visit\",\"visit_type\":\"other\",\"target_day_offset\":14,\"window_days\":2,\"confidence\":0.55,\"flagged_reason\":\"conditional visit; sub-study only\"}]}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1500,
+    "output_tokens": 250,
+    "cache_creation_input_tokens": 1200,
+    "cache_read_input_tokens": 0
+  }
+}

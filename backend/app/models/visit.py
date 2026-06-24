@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from uuid import UUID
 
-from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Enum, Float, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,3 +46,9 @@ class Visit(Base, OrgScopedMixin, TimestampMixin):
     price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     cost: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # PRD §10.2: when AI populated this row, ``confidence`` is the parser's
+    # self-reported score (0..1). NULL means the row was entered by a human
+    # (or pre-AI). ``flagged_reason`` is the short label the SoA review table
+    # shows next to amber/red rows.
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    flagged_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)

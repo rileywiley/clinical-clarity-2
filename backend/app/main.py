@@ -5,6 +5,7 @@ from app.config import get_settings
 from app.routers import (
     attrition_curves,
     auth,
+    documents,
     enrollment_weeks,
     forecast,
     health,
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(site_trials.router)
     app.include_router(enrollment_weeks.router)
     app.include_router(forecast.router)
+    app.include_router(documents.router)
     return app
 
 

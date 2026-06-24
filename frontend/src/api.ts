@@ -155,6 +155,61 @@ export type TrialMetricsOut = {
 
 export type ActiveTrialOut = { id: string; name: string };
 
+// --- Phase 5: documents + SoA parse jobs ----------------------------------
+
+export type ParsedVisitOut = {
+  name: string;
+  visit_type: "screening" | "randomization" | "follow_up" | "other";
+  target_day_offset: number;
+  window_days: number;
+  confidence: number;
+  flagged_reason: string | null;
+};
+
+export type SoaParseJobOut = {
+  id: string;
+  document_id: string;
+  trial_id: string | null;
+  status: "queued" | "running" | "succeeded" | "failed" | "applied" | "discarded";
+  model_id: string | null;
+  prompt_version: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type SoaParseJobDetailOut = SoaParseJobOut & {
+  parsed_visits: ParsedVisitOut[] | null;
+};
+
+export type TrialIn = {
+  name: string;
+  sponsor?: string | null;
+  fpfv: string;
+  lpfv: string;
+  lplv: string;
+  is_multi_arm?: boolean;
+  enrollment_target: number;
+  screening_target: number;
+};
+
+export type VisitIn = {
+  name: string;
+  visit_type: "screening" | "randomization" | "follow_up" | "other";
+  target_day_offset: number;
+  window_days?: number;
+  duration_hours_override?: number | null;
+  price?: number | null;
+  sort_order?: number;
+};
+
+export type SiteTrialIn = {
+  site_id: string;
+  per_site_enrollment_target: number;
+  per_site_screening_target: number;
+};
+
 export const api = {
   me: () => request<Me>("/auth/me"),
   login: (email: string, password: string, org_id: string) =>
@@ -250,4 +305,96 @@ export const api = {
     );
   },
   listActiveTrials: () => request<ActiveTrialOut[]>("/active-trials"),
+
+  // Phase 5 — trial setup wizard
+  createTrial: (payload: TrialIn) =>
+    request<TrialOut>("/trials", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  patchTrial: (trialId: string, payload: Partial<TrialIn>) =>
+    request<TrialOut>(`/trials/${trialId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  activateTrial: (trialId: string) =>
+    request<TrialOut>(`/trials/${trialId}/activate`, { method: "POST" }),
+  listVisits: (armId: string) =>
+    request<
+      Array<{
+        id: string;
+        arm_id: string;
+        name: string;
+        visit_type: string;
+        target_day_offset: number;
+        window_days: number;
+        price: number | null;
+        sort_order: number;
+      }>
+    >(`/arms/${armId}/visits`),
+  createVisit: (armId: string, payload: VisitIn) =>
+    request<{ id: string; name: string; visit_type: string }>(
+      `/arms/${armId}/visits`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  patchVisit: (armId: string, visitId: string, payload: Partial<VisitIn>) =>
+    request<{ id: string; name: string }>(
+      `/arms/${armId}/visits/${visitId}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+    ),
+  deleteVisit: (armId: string, visitId: string) =>
+    request<void>(`/arms/${armId}/visits/${visitId}`, { method: "DELETE" }),
+  assignSiteToTrial: (trialId: string, payload: SiteTrialIn) =>
+    request<SiteTrialOut>(`/trials/${trialId}/sites`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listAttritionCurves: () =>
+    request<
+      Array<{ id: string; name: string; total_dropout_pct: number; is_preset: boolean }>
+    >("/attrition-curves"),
+
+  // Phase 5 — documents + SoA parse jobs
+  uploadDocument: async (trialId: string, file: File): Promise<SoaParseJobOut> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    // Don't set Content-Type — browser must build the multipart boundary.
+    const res = await fetch(`/api/trials/${trialId}/documents`, {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+    });
+    if (!res.ok) {
+      let body: unknown = null;
+      try {
+        body = await res.json();
+      } catch {
+        // best effort
+      }
+      throw new ApiError(res.status, body);
+    }
+    return (await res.json()) as SoaParseJobOut;
+  },
+  getParseJob: (jobId: string) =>
+    request<SoaParseJobOut>(`/parse-jobs/${jobId}`),
+  getParsedVisits: (jobId: string) =>
+    request<SoaParseJobDetailOut>(`/parse-jobs/${jobId}/parsed-visits`),
+  applyParseJob: (
+    jobId: string,
+    payload: { arm_id: string; visits: ParsedVisitOut[] },
+  ) =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        visit_type: string;
+        target_day_offset: number;
+        window_days: number;
+      }>
+    >(`/parse-jobs/${jobId}/apply`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  discardParseJob: (jobId: string) =>
+    request<void>(`/parse-jobs/${jobId}/discard`, { method: "POST" }),
 };

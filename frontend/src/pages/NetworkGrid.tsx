@@ -138,12 +138,19 @@ export default function NetworkGrid() {
     <div className="mx-auto max-w-7xl p-6">
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Network forecast</h1>
-        <nav className="flex gap-3 text-sm">
+        <nav className="flex items-center gap-3 text-sm">
           <Link to="/projections" className="text-slate-600 hover:underline">
             Projections
           </Link>
           <Link to="/metrics" className="text-slate-600 hover:underline">
             Metrics
+          </Link>
+          <Link
+            to="/trials/new"
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+            data-testid="new-trial-link"
+          >
+            + New trial
           </Link>
         </nav>
       </header>

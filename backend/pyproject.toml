@@ -19,6 +19,9 @@ dependencies = [
   # engine pure (no web/DB imports); the backend's forecast/metrics adapters
   # are the only place engine talks to DB-shaped data.
   "engine",
+  "aiobotocore>=2.15",
+  "arq>=0.26",
+  "anthropic>=0.40",
 ]
 
 [tool.uv.sources]
