@@ -918,16 +918,27 @@ function ActivateStep({ trialId }: { trialId: string }) {
             ✓ Trial activated.
           </p>
           <p className="mt-1 text-sm text-emerald-900">
-            It now appears in the network forecast and projection grid.
+            Next: enter your per-site weekly screening + randomization
+            projections so the forecast can produce demand curves.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate(`/trials/${trialId}`)}
-            className="mt-3 rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
-            data-testid="activate-view-trial"
-          >
-            View trial
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("/projections")}
+              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+              data-testid="activate-enter-projections"
+            >
+              Enter projections →
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(`/trials/${trialId}`)}
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+              data-testid="activate-view-trial"
+            >
+              View trial
+            </button>
+          </div>
         </div>
       ) : (
         <button

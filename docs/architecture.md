@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ — first LLM call ships, arq worker live, MinIO/S3 wired, real-Claude smoke verified)
+**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ · Phase 6 ✅ deliverables — admin settings, exports, onboarding, print-to-PDF, Render blueprint)
 
 ## Top-level system
 
@@ -10,16 +10,20 @@ Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a modu
 flowchart LR
   subgraph Client["frontend (React+TS+Vite+Tailwind)"]
     APP[App.tsx]
-    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics,<br/>TrialWizard (Phase 5)"]
+    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics,<br/>TrialWizard (Phase 5)<br/>AdminSettings + Onboarding (Phase 6)"]
     SOA["components/SoaReviewTable (Phase 5)<br/>confidence bands + blocking"]
-    SHELL["components/AppShell<br/>(top bar w/ user + sign out)"]
+    SHELL["components/AppShell<br/>(top bar + nav, admin link role-gated)"]
     API_CLIENT[api.ts]
     SHEET["components/SpreadsheetGrid<br/>(headless: useKeyboardNav,<br/>useClipboardPaste)"]
     VAR["components/VarianceHint<br/>HistoryDrawer"]
     KPI["components/KpiStrip<br/>TrialColorBadge"]
+    EMPTY["components/EmptyState (Phase 6)<br/>marked .no-print"]
     GUARD["hooks/useUnsavedChangesGuard<br/>(useBlocker + beforeunload)"]
+    HOOKS6["hooks (Phase 6):<br/>useDocumentTitle,<br/>usePrintToPdf"]
+    PRINT["print.css (Phase 6)<br/>landscape · hide .no-print"]
     LIB["lib/trialColors (djb2 hash → palette)<br/>lib/utilization (band classifier)<br/>lib/formatters"]
     APP --> SHELL
+    APP --> PRINT
     SHELL --> PAGES
     APP --> API_CLIENT
     PAGES --> SHEET
@@ -28,6 +32,8 @@ flowchart LR
     PAGES --> GUARD
     PAGES --> LIB
     PAGES --> SOA
+    PAGES --> EMPTY
+    PAGES --> HOOKS6
   end
 
   subgraph Backend["backend (FastAPI)"]
@@ -47,6 +53,8 @@ flowchart LR
       R_EW["routers.enrollment_weeks<br/>(bulk PUT, history, variance)"]
       R_FC["routers.forecast<br/>(network, site, trial, calendar, metrics,<br/>active-trials)"]
       R_DOC["routers.documents (Phase 5)<br/>(upload, parse-job apply/discard)"]
+      R_USERS["routers.users (Phase 6)<br/>(admin CRUD + site assignments;<br/>guards last-active-admin)"]
+      R_EXP["routers.exports (Phase 6)<br/>(network.csv, sites/:id/forecast.csv)"]
     end
 
     subgraph Core
@@ -72,6 +80,7 @@ flowchart LR
       M_EWH[EnrollmentWeekHistory]
       M_DOC["Document (Phase 5)"]
       M_SPJ["SoaParseJob (Phase 5)<br/>parsed_visits JSONB"]
+      M_USA["UserSiteAssignment (Phase 6)<br/>m:m users↔sites"]
       M_ORG --> M_BASE
       M_USER --> M_BASE
       M_ORGSET --> M_BASE
@@ -84,6 +93,7 @@ flowchart LR
       M_STVO --> M_BASE
       M_EW --> M_BASE
       M_EWH --> M_BASE
+      M_USA --> M_BASE
     end
 
     subgraph Services
@@ -95,6 +105,7 @@ flowchart LR
       SVC_MA["metrics_adapter<br/>(DB → engine.compute_metrics)"]
       SVC_CLAUDE["claude_soa (Phase 5)<br/>system prompt + caching<br/>+ messages.parse"]
       SVC_STORAGE["storage<br/>(S3/MinIO via aiobotocore)"]
+      SVC_CSV["csv_export (Phase 6)<br/>cells_to_csv (deterministic sort)"]
     end
 
     MAIN --> Routers
@@ -144,6 +155,10 @@ flowchart LR
     R_DOC --> M_DOC
     R_DOC --> M_SPJ
     R_DOC --> M_VISIT
+    R_USERS --> M_USER
+    R_USERS --> M_USA
+    R_EXP --> SVC_CSV
+    R_EXP --> SVC_FA
   end
 
   subgraph Data
@@ -202,4 +217,8 @@ flowchart LR
 - Every domain model inherits `OrgScopedMixin` (carries `org_id`) except `Organization` itself.
 - Every request runs inside a transaction with `SET LOCAL app.current_org_id = '<uuid>'`; RLS policies on each org-scoped table read that via `current_setting('app.current_org_id')`.
 - The `/auth/login` route binds the requested `org_id` as the tenant *before* the user lookup so RLS doesn't hide the row being authenticated against — UUIDs aren't enumerable, so this doesn't leak.
+- **Users router** (Phase 6) carries the "cannot remove the last active Org Admin" guard. Demoting role or setting `active=false` on the last active admin returns 409. Caught by `test_cannot_remove_last_active_admin`; counter-test confirms an admin *can* demote self when a second admin exists.
+- **Exports** (Phase 6) are CSV-only. Same `forecast_adapter` that feeds the network/site views also feeds `csv_export.cells_to_csv` (deterministic sort by `(site_id, week_start)`). PDF export is **client-side** (`window.print()` + `print.css`) — no server-side renderer in v1.
+- **`UserSiteAssignment`** (Phase 6) is the m:m table behind site-scoped roles. Org-scoped via `OrgScopedMixin` like every other domain table; RLS policy follows the standard pattern.
+- **Render blueprint** (`render.yaml`) is checked in but **not applied**. The deploy is intentionally deferred — first-time deploy follows `docs/deploy.md`.
 - Frontend dev hits the backend via Vite's `/api` proxy, keeping both on the same origin in dev so the session cookie round-trips without CORS gymnastics.

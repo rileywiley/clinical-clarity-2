@@ -13,7 +13,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
 | 5 | Trial setup wizard + AI SoA parsing | ✅ | ✅ | ✅ | Completed 2026-06-24 |
-| 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
+| 6 | Admin settings, exports & commercialization polish | ✅ | ✅ | 🟡 | Deliverables done 2026-06-24; manual smoke pending |
 
 ---
 
@@ -378,3 +378,83 @@ Driven end-to-end by `frontend/e2e/phase5-smoke.spec.t` (Playwright + real Chrom
 - **Prompt caching on the system prompt.** Single `cache_control` breakpoint on the cached system block. Per the `claude-api` skill: render order is tools → system → messages, and the SoA prompt is large enough (~1.5K tokens) to be worth caching.
 - **Tests mock the Anthropic client.** Automated suite never burns API credits. The manual smoke is the only place a real key is needed.
 - **20 MB upload cap.** Real protocols are typically <5 MB; anything larger is likely a mistake (scanned-image PDF) and would slow Claude. The frontend reflects this in the upload hint.
+
+---
+
+## Phase 6 — Admin settings, exports & commercialization polish ✅ (deliverables)
+
+**Locked decisions** (approved 2026-06-24):
+1. **Render deploy DEFERRED** — `render.yaml` + `docs/deploy.md` ship; flipping live is a separate, post-Phase-6 op.
+2. **PDF export = client print-to-PDF** — `print.css` + `usePrintToPdf` hook. No server-side renderer (Puppeteer) in v1.
+3. **Phase 5 polish bundled into Phase 6** — confidence column on TrialDetail's SoA; post-activation "Enter projections" CTA on the wizard.
+4. **Backend-first build flow** — migration → users router → exports → tests → admin UI → exports UI → onboarding → polish.
+
+### Deliverables
+
+**Backend:**
+- `UserSiteAssignment` model + `0006_user_site_assignments` migration (RLS-isolated, `(user_id, site_id)` unique).
+- `users` router — admin CRUD + site assignment endpoints. Load-bearing safety: "cannot remove the last active Org Admin" (409). Duplicate email within org → 409.
+- `exports` router — `GET /forecast/network.csv` and `GET /sites/{id}/forecast.csv`. `text/csv` with `Content-Disposition: attachment; filename=...`. Deterministic sort by `(site_id, week_start)`.
+- `csv_export.py` service — `cells_to_csv(cells)`. Columns: `site_id, week_start, screening_visits, randomization_visits, follow_up_visits, other_visits, demand_hours, capacity_hours, utilization_pct, revenue_usd`.
+- `VisitOut` schema — exposes `confidence` and `flagged_reason` so the TrialDetail SoA table can show AI-source badges.
+
+**Frontend:**
+- `pages/AdminSettings.tsx` — `/admin/settings`, role-gated to `org_admin`. Four sections (Forecasting / Display / Org / Users) each saving independently with inline "✓ Saved — re-flowing to forecasts" feedback. Cache invalidation hits `["org-settings"]`, `["forecast-network"]`, `["site-forecast"]`. Load-bearing UX guard: green threshold must be lower than amber.
+- `pages/Onboarding.tsx` — `/onboarding`, 3-step welcome (Add site → Create trial → Invite teammate). Every step skippable; deep-link query string `?step=site|trial|team` is URL-resumable.
+- `pages/TrialWizard.tsx` (ActivateStep) — post-activation CTA: "Enter projections →" (primary) + "View trial" (secondary).
+- `pages/TrialDetail.tsx` — SoA table gains a "Source" column with a `ConfidenceBadge` (Manual / AI · NN%). Bands match the SoA review table (≥0.85 green, ≥0.6 amber, <0.6 red); `title` tooltip shows `flagged_reason`.
+- `components/EmptyState.tsx` — reusable empty-state card, marked `.no-print` so PDFs don't carry "no data yet" placeholders.
+- `hooks/useDocumentTitle.ts` — sets `document.title = "{title} · VFP"`; restores prior title on unmount.
+- `hooks/usePrintToPdf.ts` — thin wrapper around `window.print()`.
+- `print.css` — `@page` landscape, 0.5in margins; hides `.no-print`; `-webkit-print-color-adjust: exact` so utilization band colors survive print.
+- Export buttons — `Download CSV` + `Print to PDF` on NetworkGrid and SiteChart headers (both marked `.no-print`).
+- `AppShell.tsx` — nav row gains links to Network, Metrics, and (admins only) Admin. Sign-out marked `.no-print`.
+- `App.tsx` — routes `/admin/settings` and `/onboarding` registered.
+- API client — `listUsers`, `createUser`, `patchUser`, `listSiteUsers`, `assignUserToSite`, `unassignUserFromSite`, `getOrgSettings`, `patchOrgSettings`.
+
+**Infra (deferred, not applied):**
+- `render.yaml` — Blueprint for vfp-postgres + vfp-redis + vfp-backend (web) + vfp-worker (arq) + vfp-frontend (static). Secrets marked `sync: false` so the operator enters `ANTHROPIC_API_KEY` and `S3_*` in the dashboard.
+- `docs/deploy.md` — runbook + pre-flight checklist for the eventual live deploy.
+
+### Gate — automated smoke test ✅
+
+```
+backend       48 passed   (37 prior + 8 users + 3 exports)
+engine        30 passed   (no regression)
+frontend      50 passed   (42 prior + 3 EmptyState + 2 useDocumentTitle + 3 AdminSettings)
+```
+
+**Load-bearing Phase 6 assertions:**
+- `test_cannot_remove_last_active_admin` — PATCH demoting the last active admin returns 409. The block applies to demoting role and to setting `active=false`. Prevents org-lockout.
+- `test_admin_can_demote_self_when_a_second_admin_exists` — proves the guard is "last active admin", not "self".
+- `test_rls_blocks_cross_org_user_reads` — Org B's `GET /users` doesn't see Org A's users.
+- `test_admin_can_assign_user_to_site` — POST/GET/DELETE on `/sites/:id/users` works; duplicate POST returns 409.
+- `test_network_csv_headers_and_shape` — exact CSV header row is asserted; `Content-Type` starts with `text/csv` and `Content-Disposition` carries `attachment`.
+- `test_site_csv_filters_to_site` — filename includes the site name (spaces → underscores); every data row's `site_id` matches the URL.
+- `test_csv_rls_blocks_cross_org` — Org B's network CSV is header-only; Org B's request for Org A's site CSV returns 404.
+- `AdminSettings.test.tsx` — non-admins see the polite refusal and **never** call `getOrgSettings`. Admin save calls `patchOrgSettings` with the edited fields. Green ≥ amber blocks the display-defaults save.
+- `EmptyState.test.tsx` — root element carries `.no-print` so the card is excluded from PDFs.
+- `useDocumentTitle.test.ts` — title is suffixed with ` · VFP` and the previous title is restored on unmount.
+
+### Gate — manual smoke 🟡 pending
+
+Operator checklist (run after deliverables commit):
+- [ ] Sign in as Org Admin. Top nav shows the Admin link.
+- [ ] `/admin/settings` loads with all four sections pre-filled from `/org-settings`.
+- [ ] Edit a duration → Save → see "✓ Saved — re-flowing to forecasts". Reload Network grid; new util numbers reflect the duration change live.
+- [ ] Edit display thresholds with green ≥ amber → Save is blocked with inline error; nothing PATCH'd.
+- [ ] Invite a teammate as Viewer. New row appears in the Users table. Log out → log in as the viewer → `/admin/settings` shows the polite refusal; Admin link absent from nav.
+- [ ] Admin demotes self while a second admin exists → succeeds. Admin tries to demote the last admin → 409.
+- [ ] `/onboarding` (URL-typed) renders the 3-step flow. Add a site → continues. "Skip to dashboard" at any step lands on `/`.
+- [ ] Network grid → Download CSV downloads `network-forecast.csv`. Open in a spreadsheet: header row matches, weekly rows present.
+- [ ] SiteChart → Download CSV downloads `site-{name}-forecast.csv` filtered to that site.
+- [ ] Network grid → Print to PDF opens the browser dialog. Preview: nav hidden, KPI strip + grid visible, utilization band colors render.
+- [ ] Activate a trial via the wizard. Success panel shows both "Enter projections →" (primary) and "View trial" (secondary). Click "Enter projections" → lands on `/projections`.
+- [ ] TrialDetail SoA table shows "Source" column with AI · NN% badges for AI-parsed rows; "Manual" for hand-entered rows.
+
+### Phase 6 design notes
+- **CSV deterministic sort.** Same forecast-cell input always produces byte-identical CSV bytes (sorted by `(site_id, week_start)`), so file diffs across runs are meaningful.
+- **PDF = browser print, not server render.** Lower complexity, zero infra. Print stylesheet trades fidelity for portability — colors require `-webkit-print-color-adjust: exact` to survive.
+- **No "Save all" button on admin settings.** Each section saves independently, with its own status row, so a typo in one section can't accidentally clobber another's edits.
+- **Onboarding is non-blocking.** "Skip to dashboard" lives in the step rail and on each step. A fresh org can choose to skip and arrive at an empty Network grid (where the EmptyState card recommends the same three steps).
+- **Render deploy intentionally deferred.** The blueprint is checked in so the deploy is a config click in the Render dashboard, but Phase 6 ends at "ready to deploy", not "deployed". This matches the PRD §10.1 stance that ops setup is out of scope for the v1 build phase.

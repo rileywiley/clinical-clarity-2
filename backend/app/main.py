@@ -7,6 +7,7 @@ from app.routers import (
     auth,
     documents,
     enrollment_weeks,
+    exports,
     forecast,
     health,
     org_settings,
@@ -14,6 +15,7 @@ from app.routers import (
     site_trials,
     sites,
     trials,
+    users,
     visits,
 )
 
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     app.include_router(enrollment_weeks.router)
     app.include_router(forecast.router)
     app.include_router(documents.router)
+    app.include_router(users.router)
+    app.include_router(exports.router)
     return app
 
 

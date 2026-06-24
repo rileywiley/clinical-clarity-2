@@ -44,3 +44,8 @@ class VisitOut(BaseModel):
     price: float | None
     cost: float | None
     sort_order: int
+    # PRD §10.2: when this row was AI-populated, surface the parser's
+    # self-reported score + flag reason on the trial-detail SoA table so
+    # reviewers can see at a glance which rows started "amber" or "red".
+    confidence: float | None = None
+    flagged_reason: str | None = None

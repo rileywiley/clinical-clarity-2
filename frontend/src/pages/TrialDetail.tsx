@@ -199,6 +199,7 @@ export default function TrialDetail() {
                 <th className="px-3 py-2 text-right">Day offset</th>
                 <th className="px-3 py-2 text-right">Window</th>
                 <th className="px-3 py-2 text-right">Price</th>
+                <th className="px-3 py-2">Source</th>
               </tr>
             </thead>
             <tbody>
@@ -218,12 +219,18 @@ export default function TrialDetail() {
                     <td className="px-3 py-1.5 text-right">
                       {fmtUsd(v.price)}
                     </td>
+                    <td className="px-3 py-1.5">
+                      <ConfidenceBadge
+                        confidence={v.confidence}
+                        flagged={v.flagged_reason}
+                      />
+                    </td>
                   </tr>
                 )),
               )}
               {arms.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-4 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-4 text-center text-slate-500">
                     No arms.
                   </td>
                 </tr>
@@ -274,6 +281,34 @@ export default function TrialDetail() {
   );
 }
 
+function ConfidenceBadge({
+  confidence,
+  flagged,
+}: {
+  confidence: number | null;
+  flagged: string | null;
+}) {
+  if (confidence == null) {
+    return <span className="text-xs text-slate-400">Manual</span>;
+  }
+  // Bands match the SoA review table (green ≥0.85, amber ≥0.6, red <0.6).
+  const band =
+    confidence >= 0.85 ? "green" : confidence >= 0.6 ? "amber" : "red";
+  const cls = {
+    green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+  }[band];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs ${cls}`}
+      title={flagged ?? undefined}
+    >
+      AI · {(confidence * 100).toFixed(0)}%
+    </span>
+  );
+}
+
 function KvP({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -291,6 +326,8 @@ async function fetchArmVisits(armId: string): Promise<
     target_day_offset: number;
     window_days: number;
     price: number | null;
+    confidence: number | null;
+    flagged_reason: string | null;
   }[]
 > {
   const r = await fetch(`/api/arms/${armId}/visits`, { credentials: "include" });

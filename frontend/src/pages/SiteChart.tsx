@@ -26,6 +26,8 @@ import { KpiStrip } from "../components/KpiStrip";
 import { TrialColorBadge } from "../components/TrialColorBadge";
 import { trialColor } from "../lib/trialColors";
 import { fmtMonDay, fmtPct, fmtUsd } from "../lib/formatters";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { usePrintToPdf } from "../hooks/usePrintToPdf";
 
 type StackBy = "trial" | "visit_type";
 
@@ -62,6 +64,8 @@ export default function SiteChart() {
   });
 
   const site = sitesQ.data?.find((s) => s.id === siteId);
+  useDocumentTitle(site ? site.name : "Site");
+  const printToPdf = usePrintToPdf();
   const cells = cellsQ.data ?? [];
 
   const trialsById = useMemo(() => {
@@ -163,12 +167,29 @@ export default function SiteChart() {
 
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{site.name}</h1>
-        <Link
-          to={`/sites/${siteId}/calendar`}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm"
-        >
-          Calendar view
-        </Link>
+        <div className="flex items-center gap-2 no-print">
+          <a
+            href={`/api/sites/${siteId}/forecast.csv`}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+            data-testid="export-site-csv"
+          >
+            Download CSV
+          </a>
+          <button
+            type="button"
+            onClick={printToPdf}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+            data-testid="export-site-pdf"
+          >
+            Print to PDF
+          </button>
+          <Link
+            to={`/sites/${siteId}/calendar`}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            Calendar view
+          </Link>
+        </div>
       </header>
 
       <div className="mb-4">

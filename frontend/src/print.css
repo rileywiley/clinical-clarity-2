@@ -1,0 +1,56 @@
+/* Print stylesheet — used by the browser's Print → Save as PDF (PRD §7.4).
+ *
+ * Three jobs:
+ *   1. Hide app chrome (top bar, nav, buttons) so the PDF is just the data.
+ *   2. Force the utilization color bands to render — browsers strip background
+ *      colors by default to save toner; we override with print-color-adjust.
+ *   3. Let wide tables (network grid, SoA) fit on a landscape page.
+ *
+ * Any element marked .no-print stays off the page. Add it to interactive UI
+ * (Export buttons, dropdowns) and to empty-state panels that shouldn't go
+ * into a deliverable PDF.
+ */
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.5in;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  /* App shell (top bar with sign-out etc.) and any explicitly-hidden chrome. */
+  .no-print,
+  header[aria-hidden="false"] > div,
+  nav[aria-label="Breadcrumb"],
+  button,
+  a[role="button"] {
+    display: none !important;
+  }
+
+  /* Re-show the page heading by removing the button-hiding rule on h1 (which
+   * we never style as a button anyway — defensive). */
+  h1 {
+    display: block !important;
+    page-break-after: avoid;
+  }
+
+  /* Force background colors on utilization cells, KPI tiles, attrition badges.
+   * Without this the network grid prints as a wall of white. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Tables shouldn't break in the middle of a row. */
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Recharts SVG container can overflow; force it to fit. */
+  .recharts-responsive-container {
+    page-break-inside: avoid;
+  }
+}

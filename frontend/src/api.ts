@@ -397,4 +397,73 @@ export const api = {
     }),
   discardParseJob: (jobId: string) =>
     request<void>(`/parse-jobs/${jobId}/discard`, { method: "POST" }),
+
+  // Phase 6 — admin settings (users, exports)
+  listUsers: () =>
+    request<
+      Array<{
+        id: string;
+        email: string;
+        name: string;
+        role: Me["role"];
+        active: boolean;
+      }>
+    >("/users"),
+  createUser: (payload: {
+    email: string;
+    name: string;
+    password: string;
+    role: Me["role"];
+  }) =>
+    request<{ id: string; email: string; name: string; role: Me["role"]; active: boolean }>(
+      "/users",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  patchUser: (
+    userId: string,
+    payload: { name?: string; role?: Me["role"]; active?: boolean },
+  ) =>
+    request<{ id: string; email: string; name: string; role: Me["role"]; active: boolean }>(
+      `/users/${userId}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+    ),
+  listSiteUsers: (siteId: string) =>
+    request<
+      Array<{
+        assignment_id: string;
+        user_id: string;
+        email: string;
+        name: string;
+        role: Me["role"];
+      }>
+    >(`/sites/${siteId}/users`),
+  assignUserToSite: (siteId: string, userId: string) =>
+    request<{ assignment_id: string; user_id: string }>(`/sites/${siteId}/users`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    }),
+  unassignUserFromSite: (siteId: string, userId: string) =>
+    request<void>(`/sites/${siteId}/users/${userId}`, { method: "DELETE" }),
+
+  // Phase 6 — OrgSettings (already in backend; thin client wrapper)
+  getOrgSettings: () =>
+    request<{
+      id: string;
+      dur_screening_hours: number;
+      dur_randomization_hours: number;
+      dur_follow_up_hours: number;
+      dur_other_hours: number;
+      util_threshold_green_max: number;
+      util_threshold_amber_max: number;
+      default_grid_weeks_visible: number;
+      default_horizon_months: number;
+      default_site_hours_per_day: number;
+      default_attrition_curve_id: string | null;
+      currency: string;
+    }>("/org-settings"),
+  patchOrgSettings: (payload: Record<string, unknown>) =>
+    request<{ id: string }>("/org-settings", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 };

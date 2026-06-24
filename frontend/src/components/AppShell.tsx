@@ -14,9 +14,24 @@ export default function AppShell({ me, children }: { me: Me; children: React.Rea
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-2 text-sm">
-          <Link to="/" className="font-semibold text-slate-800 hover:underline">
-            Volume Forecasting Platform
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/" className="font-semibold text-slate-800 hover:underline">
+              Volume Forecasting Platform
+            </Link>
+            <nav className="flex items-center gap-3 text-slate-500 no-print">
+              <Link to="/" className="hover:underline">Network</Link>
+              <Link to="/metrics" className="hover:underline">Metrics</Link>
+              {me.role === "org_admin" && (
+                <Link
+                  to="/admin/settings"
+                  className="hover:underline"
+                  data-testid="nav-admin-settings"
+                >
+                  Admin
+                </Link>
+              )}
+            </nav>
+          </div>
           <div className="flex items-center gap-3 text-slate-600">
             <span>
               {me.name} <span className="text-slate-400">({me.role})</span>
@@ -24,7 +39,7 @@ export default function AppShell({ me, children }: { me: Me; children: React.Rea
             <button
               type="button"
               onClick={onLogout}
-              className="rounded border border-slate-300 px-2 py-0.5 text-xs"
+              className="rounded border border-slate-300 px-2 py-0.5 text-xs no-print"
             >
               Sign out
             </button>

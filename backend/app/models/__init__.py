@@ -9,6 +9,7 @@ from app.models.site_trial import SiteTrial, SiteTrialVisitOverride
 from app.models.soa_parse_job import SoaParseJob, SoaParseJobStatus
 from app.models.trial import Arm, Trial, TrialStatus
 from app.models.user import User, UserRole
+from app.models.user_site_assignment import UserSiteAssignment
 from app.models.visit import Visit, VisitType
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "TrialStatus",
     "User",
     "UserRole",
+    "UserSiteAssignment",
     "Visit",
     "VisitType",
 ]

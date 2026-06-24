@@ -14,6 +14,8 @@ import type { ForecastCellOut } from "../api";
 import { KpiStrip } from "../components/KpiStrip";
 import { bandClasses, classifyUtil, type UtilThresholds } from "../lib/utilization";
 import { fmtCount, fmtMonDay, fmtPct, fmtUsd } from "../lib/formatters";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import { usePrintToPdf } from "../hooks/usePrintToPdf";
 
 function isoToday(): string {
   return new Date().toISOString().slice(0, 10);
@@ -34,6 +36,8 @@ function addWeeks(iso: string, n: number): string {
 }
 
 export default function NetworkGrid() {
+  useDocumentTitle("Network forecast");
+  const printToPdf = usePrintToPdf();
   const todayMonday = useMemo(() => isoMondayOf(isoToday()), []);
   const from = todayMonday;
   const to = useMemo(() => addWeeks(todayMonday, 11), [todayMonday]);
@@ -138,13 +142,28 @@ export default function NetworkGrid() {
     <div className="mx-auto max-w-7xl p-6">
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Network forecast</h1>
-        <nav className="flex items-center gap-3 text-sm">
+        <nav className="flex items-center gap-3 text-sm no-print">
           <Link to="/projections" className="text-slate-600 hover:underline">
             Projections
           </Link>
           <Link to="/metrics" className="text-slate-600 hover:underline">
             Metrics
           </Link>
+          <a
+            href="/api/forecast/network.csv"
+            className="rounded border border-slate-300 px-3 py-1.5 text-slate-700"
+            data-testid="export-network-csv"
+          >
+            Download CSV
+          </a>
+          <button
+            type="button"
+            onClick={printToPdf}
+            className="rounded border border-slate-300 px-3 py-1.5 text-slate-700"
+            data-testid="export-network-pdf"
+          >
+            Print to PDF
+          </button>
           <Link
             to="/trials/new"
             className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"

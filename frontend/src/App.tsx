@@ -10,6 +10,8 @@ import SiteCalendar from "./pages/SiteCalendar";
 import TrialDetail from "./pages/TrialDetail";
 import TrialWizard from "./pages/TrialWizard";
 import Metrics from "./pages/Metrics";
+import AdminSettings from "./pages/AdminSettings";
+import Onboarding from "./pages/Onboarding";
 
 export default function App() {
   const meQuery = useQuery({
@@ -47,6 +49,8 @@ export default function App() {
         <Route path="/sites/:siteId/calendar" element={<SiteCalendar />} />
         <Route path="/trials/new" element={<TrialWizard />} />
         <Route path="/trials/:trialId" element={<TrialDetail />} />
+        <Route path="/admin/settings" element={<AdminSettings me={meQuery.data!} />} />
+        <Route path="/onboarding" element={<Onboarding me={meQuery.data!} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>
