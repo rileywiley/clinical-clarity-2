@@ -12,7 +12,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 2 | Core data model & CRUD (Sites/Trials/SoA/etc + OrgSettings) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
-| 5 | Trial setup wizard + AI SoA parsing | 🟡 | ✅ | _pending_ | Started 2026-06-24 |
+| 5 | Trial setup wizard + AI SoA parsing | ✅ | ✅ | ✅ | Completed 2026-06-24 |
 | 6 | Admin settings, exports & commercialization polish | ⬜ | — | — | Render deploy lands here |
 
 ---
@@ -292,9 +292,9 @@ Driven end-to-end by `frontend/e2e/phase4-smoke.spec.ts` (Playwright + real Chro
 
 ---
 
-## Phase 5 — Trial setup wizard + AI SoA parsing 🟡
+## Phase 5 — Trial setup wizard + AI SoA parsing ✅
 
-**Started:** 2026-06-24
+**Started:** 2026-06-24 · **Completed:** 2026-06-24
 
 ### Delivered
 
@@ -346,8 +346,30 @@ frontend      42 passed  (35 prior + 7 new SoaReviewTable)
 - `test passes the user-edited visits (not the originals) to onConfirm` — proves the review is what gets sent
 - `test lets the user remove a row` — removing a red row also unblocks
 
-### Gate — manual smoke ⏳ in progress
-- [ ] Set `ANTHROPIC_API_KEY` in `.env`; bring up `docker compose up`; upload a real protocol PDF via the wizard; watch the parse run; review and correct any flagged rows; complete the wizard through to Activate; confirm the trial appears in the network grid.
+### Gate — manual smoke ✅
+
+Driven end-to-end by `frontend/e2e/phase5-smoke.spec.t` (Playwright + real Chromium + **real Anthropic API**) on 2026-06-24. The full wizard happy path executes in ~58s, including ~30s of Claude inference on the 5.8 MB protocol PDF. Screenshots captured in `frontend/e2e/screenshots/p5-*.png` (gitignored).
+
+- [x] Sign in, open `/trials/new`, see all 6 step chips with only Basics enabled.
+- [x] Fill Basics (name + FPFV/LPFV/LPLV) → Save & continue. Wizard navigates to `?step=soa`, every chip becomes clickable (URL-resumable behavior).
+- [x] Upload `/Users/rickydelemos/Desktop/protocol.pdf` (5.8 MB). Document row persists to MinIO, parse job enqueued on arq, status transitions `queued → running → succeeded` (visible in the worker log).
+- [x] **Real Claude call succeeded** — `claude-opus-4-7` with adaptive thinking, vision (base64 PDF block), system-prompt caching. Parsed 13 visits from the protocol's SoA. Per-row outputs:
+  - Screening: day -21, ±7d, **78% confidence (amber)** — flagged "screening window D-28 to D-14; midpoint used" (Claude noted the original window was asymmetric and chose to center it)
+  - Baseline (Randomization): day 0, 95%
+  - Weeks 2/4/8/12/16/20/24/28/32 follow-ups: all day-offsets correct, all 95%
+  - Week 36 "(End of Treatment)": 95% — Claude inferred the semantic label from the table
+  - **Week 52 Safety Follow-up: 80% (amber)**, classified as `other` not `follow_up`, flagged "asymmetric window +5d only"
+- [x] No red rows in this run → Confirm enabled immediately ("Confirm 13 visits"); confidence band colors render correctly (amber rows have light-yellow background + amber left border).
+- [x] Click Confirm → wizard advances to `?step=sites`, all 13 Visit rows persisted to the trial's arm.
+- [x] Assign the seeded site → continue → pricing (skipped, no edits) → attrition (Standard preset selected by default) → activate.
+- [x] Activate succeeded — green "✓ Trial activated" panel renders; trial appears in the network forecast.
+
+**Cost:** one real Claude inference on a ~5.8 MB PDF. PRD §10.2 mitigation verified end-to-end against a live API.
+
+**Caught and fixed during smoke:**
+1. **Redis port collision** — another project's Redis was bound to host port 6379. Remapped our compose Redis to host port 56379 (consistent with the Phase 0 Postgres 55432 convention). Container-internal port is still 6379.
+2. **`.env` loading from repo root** — `pydantic-settings` looked for `.env` in CWD only, so the worker started from `backend/` didn't see the repo-root `.env` containing `ANTHROPIC_API_KEY`. Fixed by passing `env_file=(".env", "../.env")` to `SettingsConfigDict` — first match wins.
+3. **Playwright default timeout** — the global 60s test timeout fires before the inner `expect(...).toBeVisible({ timeout: 180_000 })` matters. Bumped `test.setTimeout(360_000)` for the Phase 5 smoke to give Claude room to run.
 
 ### Phase 5 design notes
 - **Parsed visits stay in JSONB until apply.** PRD §10.2 mitigation. There is no "pending Visit row" intermediate state — the engine literally cannot see unconfirmed AI output.

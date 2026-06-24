@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 🟡 — first LLM call ships, arq worker live, MinIO/S3 wired)
+**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ — first LLM call ships, arq worker live, MinIO/S3 wired, real-Claude smoke verified)
 
 ## Top-level system
 
