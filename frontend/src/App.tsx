@@ -12,6 +12,7 @@ import TrialWizard from "./pages/TrialWizard";
 import Metrics from "./pages/Metrics";
 import AdminSettings from "./pages/AdminSettings";
 import Onboarding from "./pages/Onboarding";
+import Import from "./pages/Import";
 
 export default function App() {
   const meQuery = useQuery({
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/trials/:trialId" element={<TrialDetail />} />
         <Route path="/admin/settings" element={<AdminSettings me={meQuery.data!} />} />
         <Route path="/onboarding" element={<Onboarding me={meQuery.data!} />} />
+        <Route path="/import" element={<Import me={meQuery.data!} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

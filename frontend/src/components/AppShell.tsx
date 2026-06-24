@@ -22,13 +22,22 @@ export default function AppShell({ me, children }: { me: Me; children: React.Rea
               <Link to="/" className="hover:underline">Network</Link>
               <Link to="/metrics" className="hover:underline">Metrics</Link>
               {me.role === "org_admin" && (
-                <Link
-                  to="/admin/settings"
-                  className="hover:underline"
-                  data-testid="nav-admin-settings"
-                >
-                  Admin
-                </Link>
+                <>
+                  <Link
+                    to="/admin/settings"
+                    className="hover:underline"
+                    data-testid="nav-admin-settings"
+                  >
+                    Admin
+                  </Link>
+                  <Link
+                    to="/import"
+                    className="hover:underline"
+                    data-testid="nav-import"
+                  >
+                    Import
+                  </Link>
+                </>
               )}
             </nav>
           </div>

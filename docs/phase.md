@@ -14,6 +14,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
 | 5 | Trial setup wizard + AI SoA parsing | ✅ | ✅ | ✅ | Completed 2026-06-24 |
 | 6 | Admin settings, exports & commercialization polish | ✅ | ✅ | ✅ | Completed 2026-06-24 |
+| — | **Post-Phase-6 features** (out-of-PRD enhancements, no gates) | | | | See bottom of file |
 
 ---
 
@@ -466,3 +467,39 @@ These are commercialization-polish wins, not data-integrity bugs in the engine. 
 - **No "Save all" button on admin settings.** Each section saves independently, with its own status row, so a typo in one section can't accidentally clobber another's edits.
 - **Onboarding is non-blocking.** "Skip to dashboard" lives in the step rail and on each step. A fresh org can choose to skip and arrive at an empty Network grid (where the EmptyState card recommends the same three steps).
 - **Render deploy intentionally deferred.** The blueprint is checked in so the deploy is a config click in the Render dashboard, but Phase 6 ends at "ready to deploy", not "deployed". This matches the PRD §10.1 stance that ops setup is out of scope for the v1 build phase.
+
+---
+
+## Post-Phase-6 features
+
+These are out-of-PRD enhancements shipped after the seven-phase gated build. They reuse the same test discipline (no untested code paths, no silent changes to the five modeling decisions), but don't have a separate manual-smoke gate — they're additive features the user requested directly.
+
+### Bulk CSV import (2026-06-24)
+
+**What:** `/import` page (org_admin-gated) with three tabs — Sites, Trials, Projections — sharing one preview→commit flow. Power-user shortcut to load multiple sites / trials / projection weeks at once without clicking through the wizard.
+
+**Locked decisions** (user-approved before scaffolding):
+1. **Three separate CSV templates** rather than one combined wide-CSV. Per-domain validation rules stay clear; the trial CSV stops short of SoA visits (those keep flowing through the AI parser).
+2. **Trials always import as `draft`.** The wizard's activation validator (PRD §6.2) still owns activation per trial — bulk import never side-steps it.
+3. **All-or-nothing per upload.** Single DB transaction; if any row fails, the whole file is rejected and the preview shows every error at once. No half-imported state to clean up.
+4. **Preview ↔ commit** as separate endpoints — preview is a server-side dry run (validates + resolves FKs by name + returns the planned actions), commit re-validates and writes.
+
+**Backend:**
+- `services/csv_import.py` — per-kind validators + writers; returns `(actions, errors)`. FKs resolve by name within the org (Site name, Trial name, AttritionCurve name, Arm name).
+- `routers/imports.py` — `GET /imports/templates/{kind}.csv` (header + example rows), `POST /imports/{kind}/preview` (returns `{ok, actions, errors}`), `POST /imports/{kind}/commit` (writes atomically; returns 422 with the same error shape if validation fails).
+- CSV format rules:
+  - **Sites:** `name, timezone, operating_weekdays, hours_per_day, rooms`. `operating_weekdays` accepts `Mon Tue Wed Thu Fri` or `0,1,2,3,4`.
+  - **Trials:** one row per `(trial, site)` assignment. Trial-level fields may be left blank on rows 2+ for the same trial (inherit from the first occurrence); if filled, they must match. Sum of per-site rand and screen targets must equal the study targets — same rule as the wizard's reconciliation modal.
+  - **Projections:** `site_name, trial_name, arm_name, week_start, proj_screened, proj_randomized`. `arm_name` blank → "Default Arm". `week_start` must be a Monday (matches PRD §6.2 decision #5 — weekly buckets are site-local weeks anchored to Monday). Re-uploading an existing `(site, trial, arm, week)` upserts; actuals are never touched.
+
+**Frontend:**
+- `pages/Import.tsx` — 3-tab page; per tab: Download template → file picker → Preview → Commit. Errors render in a red table (row # + message); preview-ok renders a "ready to commit" panel. After commit, success panel shows the per-row actions + "Import another file" reset.
+- `AppShell.tsx` — Admin-only **Import** nav link beside Admin.
+- `App.tsx` — `/import` route registered.
+- API client — `importTemplateUrl`, `previewImport`, `commitImport`.
+
+**Tests:**
+- Backend (12): per-kind happy path, target-sum mismatch, continuation-row conflicting fields, unknown site, non-Monday week, duplicate-in-file, projection upsert overwriting, transaction-rollback-on-any-error, admin-only gating, template download.
+- Frontend (3): non-admin refusal, preview errors disable Commit, clean preview → commit → success panel.
+
+**Out of scope:** SoA visit rows (the AI parser is the right path for those); trial activation from import (always draft); CTMS-style polling (one-shot upload).

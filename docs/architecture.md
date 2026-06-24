@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ · Phase 6 ✅ deliverables — admin settings, exports, onboarding, print-to-PDF, Render blueprint)
+**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ · Phase 6 ✅ · post-P6: bulk CSV import live)
 
 ## Top-level system
 
@@ -10,7 +10,7 @@ Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a modu
 flowchart LR
   subgraph Client["frontend (React+TS+Vite+Tailwind)"]
     APP[App.tsx]
-    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics,<br/>TrialWizard (Phase 5)<br/>AdminSettings + Onboarding (Phase 6)"]
+    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics,<br/>TrialWizard (Phase 5)<br/>AdminSettings + Onboarding (Phase 6)<br/>Import (post-P6 bulk CSV)"]
     SOA["components/SoaReviewTable (Phase 5)<br/>confidence bands + blocking"]
     SHELL["components/AppShell<br/>(top bar + nav, admin link role-gated)"]
     API_CLIENT[api.ts]
@@ -55,6 +55,7 @@ flowchart LR
       R_DOC["routers.documents (Phase 5)<br/>(upload, parse-job apply/discard)"]
       R_USERS["routers.users (Phase 6)<br/>(admin CRUD + site assignments;<br/>guards last-active-admin)"]
       R_EXP["routers.exports (Phase 6)<br/>(network.csv, sites/:id/forecast.csv)"]
+      R_IMP["routers.imports (post-P6)<br/>(templates/preview/commit;<br/>sites · trials · projections)"]
     end
 
     subgraph Core
@@ -106,6 +107,7 @@ flowchart LR
       SVC_CLAUDE["claude_soa (Phase 5)<br/>system prompt + caching<br/>+ messages.parse"]
       SVC_STORAGE["storage<br/>(S3/MinIO via aiobotocore)"]
       SVC_CSV["csv_export (Phase 6)<br/>cells_to_csv (deterministic sort)"]
+      SVC_CSVI["csv_import (post-P6)<br/>per-kind validate + write<br/>(all-or-nothing transaction)"]
     end
 
     MAIN --> Routers
@@ -159,6 +161,13 @@ flowchart LR
     R_USERS --> M_USA
     R_EXP --> SVC_CSV
     R_EXP --> SVC_FA
+    R_IMP --> SVC_CSVI
+    SVC_CSVI --> M_SITE
+    SVC_CSVI --> M_TRIAL
+    SVC_CSVI --> M_ARM
+    SVC_CSVI --> M_STRIAL
+    SVC_CSVI --> M_EW
+    SVC_CSVI --> M_CURVE
   end
 
   subgraph Data
@@ -221,4 +230,5 @@ flowchart LR
 - **Exports** (Phase 6) are CSV-only. Same `forecast_adapter` that feeds the network/site views also feeds `csv_export.cells_to_csv` (deterministic sort by `(site_id, week_start)`). PDF export is **client-side** (`window.print()` + `print.css`) — no server-side renderer in v1.
 - **`UserSiteAssignment`** (Phase 6) is the m:m table behind site-scoped roles. Org-scoped via `OrgScopedMixin` like every other domain table; RLS policy follows the standard pattern.
 - **Render blueprint** (`render.yaml`) is checked in but **not applied**. The deploy is intentionally deferred — first-time deploy follows `docs/deploy.md`.
+- **Bulk CSV import** (`routers/imports.py` + `services/csv_import.py`, post-P6) is the org_admin shortcut to load many sites / trials / projections at once. Preview is a server-side dry-run; commit re-validates and writes in **one DB transaction** (all-or-nothing — `csv_import.commit_*` returns the same shape as preview, the router converts errors into a 422 with `{detail: {errors: [...]}}`). FK resolution by **name within org** is what makes a hand-edited spreadsheet usable; unknown names → preview error rather than a silent skip. Trial imports always land in `draft` status — activation stays with the wizard's validator (PRD §6.2).
 - Frontend dev hits the backend via Vite's `/api` proxy, keeping both on the same origin in dev so the session cookie round-trips without CORS gymnastics.

@@ -454,6 +454,52 @@ export const api = {
   unassignUserFromSite: (siteId: string, userId: string) =>
     request<void>(`/sites/${siteId}/users/${userId}`, { method: "DELETE" }),
 
+  // Post-Phase-6 — bulk CSV import (sites / trials / projections)
+  importTemplateUrl: (kind: "sites" | "trials" | "projections") =>
+    `/api/imports/templates/${kind}.csv`,
+  previewImport: async (
+    kind: "sites" | "trials" | "projections",
+    file: File,
+  ): Promise<{
+    ok: boolean;
+    actions: string[];
+    errors: Array<{ row: number; message: string }>;
+  }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/imports/${kind}/preview`, {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+    });
+    if (!res.ok) {
+      throw new ApiError(res.status, await res.text().catch(() => ""));
+    }
+    return res.json();
+  },
+  commitImport: async (
+    kind: "sites" | "trials" | "projections",
+    file: File,
+  ): Promise<{ ok: boolean; actions: string[] }> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/imports/${kind}/commit`, {
+      method: "POST",
+      credentials: "include",
+      body: fd,
+    });
+    if (res.status === 422) {
+      // Validation failures — the server returns
+      // {detail: {errors: [{row, message}]}} so the caller can re-render.
+      const body = await res.json();
+      throw new ApiError(422, body);
+    }
+    if (!res.ok) {
+      throw new ApiError(res.status, await res.text().catch(() => ""));
+    }
+    return res.json();
+  },
+
   // Phase 6 — OrgSettings (already in backend; thin client wrapper)
   getOrgSettings: () =>
     request<{

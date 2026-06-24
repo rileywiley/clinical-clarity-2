@@ -10,6 +10,7 @@ from app.routers import (
     exports,
     forecast,
     health,
+    imports,
     org_settings,
     orgs,
     site_trials,
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router)
     app.include_router(users.router)
     app.include_router(exports.router)
+    app.include_router(imports.router)
     return app
 
 
