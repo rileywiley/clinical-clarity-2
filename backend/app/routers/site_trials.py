@@ -16,6 +16,7 @@ from app.schemas.site_trial import (
     SiteTrialIn,
     SiteTrialOut,
     SiteTrialPatch,
+    SiteTrialWithTrialOut,
     VisitOverrideIn,
     VisitOverrideOut,
 )
@@ -41,6 +42,45 @@ async def list_assignments(
         await db.execute(select(SiteTrial).where(SiteTrial.trial_id == trial_id))
     ).scalars().all()
     return list(rows)
+
+
+@router.get(
+    "/sites/{site_id}/trials",
+    response_model=list[SiteTrialWithTrialOut],
+)
+async def list_trials_at_site(
+    site_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SiteTrialWithTrialOut]:
+    """Trials assigned to a given site, with the trial's name + status.
+
+    Used by the per-site chart page so the user can see (and link out to)
+    which trials are running at the site they're looking at.
+    """
+    s = await db.get(Site, site_id)
+    if s is None or s.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    rows = (
+        await db.execute(
+            select(SiteTrial, Trial)
+            .join(Trial, Trial.id == SiteTrial.trial_id)
+            .where(SiteTrial.site_id == site_id)
+        )
+    ).all()
+    return [
+        SiteTrialWithTrialOut(
+            id=st.id,
+            site_id=st.site_id,
+            trial_id=st.trial_id,
+            per_site_enrollment_target=st.per_site_enrollment_target,
+            per_site_screening_target=st.per_site_screening_target,
+            active=st.active,
+            trial_name=t.name,
+            trial_status=t.status.value,
+        )
+        for st, t in rows
+    ]
 
 
 @router.post(

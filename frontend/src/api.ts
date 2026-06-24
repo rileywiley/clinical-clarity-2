@@ -224,6 +224,15 @@ export const api = {
   listArms: (trialId: string) => request<ArmOut[]>(`/trials/${trialId}/arms`),
   listAssignments: (trialId: string) =>
     request<SiteTrialOut[]>(`/trials/${trialId}/sites`),
+  listTrialsAtSite: (siteId: string) =>
+    request<
+      Array<
+        SiteTrialOut & {
+          trial_name: string;
+          trial_status: "draft" | "active" | "closed";
+        }
+      >
+    >(`/sites/${siteId}/trials`),
 
   listEnrollmentWeeks: (
     siteTrialId: string,

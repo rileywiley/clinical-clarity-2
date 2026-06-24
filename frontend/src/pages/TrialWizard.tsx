@@ -533,14 +533,54 @@ function SoaStep({ trialId, onDone }: { trialId: string; onDone: () => void }) {
 
 function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void }) {
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  const trialQ = useQuery({
+    queryKey: ["trial", trialId],
+    queryFn: async () => {
+      const all = await api.listTrials();
+      return all.find((t) => t.id === trialId) ?? null;
+    },
+  });
   const assignmentsQ = useQuery({
     queryKey: ["assignments", trialId],
     queryFn: () => api.listAssignments(trialId),
   });
   const [selectedSite, setSelectedSite] = useState<string>("");
-  const [rand, setRand] = useState(50);
-  const [screen, setScreen] = useState(62);
+  // The Add-site row defaults are derived from the study-level targets (Basics
+  // step). On the first site, default = full study target; subsequent sites
+  // default to whatever is still unallocated so the totals stay linked.
+  const studyRand = trialQ.data?.enrollment_target ?? 0;
+  const studyScreen = trialQ.data?.screening_target ?? 0;
+  const assigned = assignmentsQ.data ?? [];
+  const sumAssignedRand = assigned.reduce(
+    (s, a) => s + a.per_site_enrollment_target,
+    0,
+  );
+  const sumAssignedScreen = assigned.reduce(
+    (s, a) => s + a.per_site_screening_target,
+    0,
+  );
+  const remainingRand = Math.max(0, studyRand - sumAssignedRand);
+  const remainingScreen = Math.max(0, studyScreen - sumAssignedScreen);
+  const [rand, setRand] = useState<number>(0);
+  const [screen, setScreen] = useState<number>(0);
+  const [randTouched, setRandTouched] = useState(false);
+  const [screenTouched, setScreenTouched] = useState(false);
+  // Reflect remaining-to-allocate into the inputs until the user types into
+  // them; once touched, leave their entry alone.
+  useEffect(() => {
+    if (!randTouched) setRand(remainingRand);
+  }, [remainingRand, randTouched]);
+  useEffect(() => {
+    if (!screenTouched) setScreen(remainingScreen);
+  }, [remainingScreen, screenTouched]);
+
   const [error, setError] = useState<string | null>(null);
+  // Mismatch reconciliation modal — fired on Continue when site totals don't
+  // match the study target.
+  const [mismatch, setMismatch] = useState<{
+    siteTotalRand: number;
+    siteTotalScreen: number;
+  } | null>(null);
 
   const qc = useQueryClient();
   const assign = useMutation({
@@ -554,24 +594,58 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
     },
     onSuccess: () => {
       setSelectedSite("");
+      setRandTouched(false);
+      setScreenTouched(false);
       setError(null);
       qc.invalidateQueries({ queryKey: ["assignments", trialId] });
     },
     onError: () => setError("Failed to assign site."),
   });
+  const patchTargets = useMutation({
+    mutationFn: async (patch: {
+      enrollment_target: number;
+      screening_target: number;
+    }) => api.patchTrial(trialId, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["trial", trialId] });
+      qc.invalidateQueries({ queryKey: ["trials"] });
+    },
+  });
 
   const assignedIds = useMemo(
-    () => new Set((assignmentsQ.data ?? []).map((a) => a.site_id)),
-    [assignmentsQ.data],
+    () => new Set(assigned.map((a) => a.site_id)),
+    [assigned],
   );
   const available = (sitesQ.data ?? []).filter((s) => !assignedIds.has(s.id));
   const sitesById = new Map((sitesQ.data ?? []).map((s) => [s.id, s]));
+
+  function onContinueClick() {
+    const rTot = sumAssignedRand;
+    const sTot = sumAssignedScreen;
+    if (rTot !== studyRand || sTot !== studyScreen) {
+      setMismatch({ siteTotalRand: rTot, siteTotalScreen: sTot });
+      return;
+    }
+    onDone();
+  }
+
+  async function acceptSiteTotalsAsStudy() {
+    if (!mismatch) return;
+    await patchTargets.mutateAsync({
+      enrollment_target: mismatch.siteTotalRand,
+      screening_target: mismatch.siteTotalScreen,
+    });
+    setMismatch(null);
+    onDone();
+  }
 
   return (
     <section className="rounded border border-slate-200 bg-white p-4">
       <h2 className="mb-2 text-base font-semibold">Sites &amp; targets</h2>
       <p className="mb-3 text-sm text-slate-500">
         Assign sites and set their per-site randomization/screening targets.
+        Site totals must sum to the study-level targets set in Basics
+        ({studyRand} randomized / {studyScreen} screened).
       </p>
 
       <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
@@ -596,8 +670,12 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
               type="number"
               min={0}
               value={rand}
-              onChange={(e) => setRand(Number(e.target.value))}
+              onChange={(e) => {
+                setRand(Number(e.target.value));
+                setRandTouched(true);
+              }}
               className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5"
+              data-testid="sites-rand-input"
             />
           </label>
           <label className="text-sm">
@@ -606,8 +684,12 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
               type="number"
               min={0}
               value={screen}
-              onChange={(e) => setScreen(Number(e.target.value))}
+              onChange={(e) => {
+                setScreen(Number(e.target.value));
+                setScreenTouched(true);
+              }}
               className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5"
+              data-testid="sites-screen-input"
             />
           </label>
           <button
@@ -620,12 +702,16 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
             {assign.isPending ? "Adding…" : "Add"}
           </button>
         </div>
-        {error && (
-          <p className="mt-2 text-sm text-red-700">{error}</p>
-        )}
+        <p className="mt-2 text-xs text-slate-500">
+          Defaults to the remaining unallocated targets ({remainingRand} rand /{" "}
+          {remainingScreen} screen). Edit before Add to override.
+        </p>
+        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
       </div>
 
-      <h3 className="mb-2 text-sm font-medium">Assigned ({assignmentsQ.data?.length ?? 0})</h3>
+      <h3 className="mb-2 text-sm font-medium">
+        Assigned ({assigned.length})
+      </h3>
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-600">
           <tr>
@@ -635,7 +721,7 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
           </tr>
         </thead>
         <tbody>
-          {(assignmentsQ.data ?? []).map((a) => {
+          {assigned.map((a) => {
             const s = sitesById.get(a.site_id);
             return (
               <tr key={a.id} className="border-t border-slate-100">
@@ -649,10 +735,35 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
               </tr>
             );
           })}
-          {(assignmentsQ.data ?? []).length === 0 && (
+          {assigned.length === 0 && (
             <tr>
               <td colSpan={3} className="py-4 text-center text-slate-500">
                 No sites assigned yet.
+              </td>
+            </tr>
+          )}
+          {assigned.length > 0 && (
+            <tr className="border-t border-slate-300 bg-slate-50 font-medium">
+              <td className="px-3 py-1.5">Total</td>
+              <td
+                className={`px-3 py-1.5 text-right ${
+                  sumAssignedRand === studyRand
+                    ? "text-emerald-700"
+                    : "text-amber-700"
+                }`}
+                data-testid="sites-total-rand"
+              >
+                {sumAssignedRand} / {studyRand}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right ${
+                  sumAssignedScreen === studyScreen
+                    ? "text-emerald-700"
+                    : "text-amber-700"
+                }`}
+                data-testid="sites-total-screen"
+              >
+                {sumAssignedScreen} / {studyScreen}
               </td>
             </tr>
           )}
@@ -662,14 +773,56 @@ function SitesStep({ trialId, onDone }: { trialId: string; onDone: () => void })
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          onClick={onDone}
-          disabled={(assignmentsQ.data ?? []).length === 0}
+          onClick={onContinueClick}
+          disabled={assigned.length === 0}
           className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
           data-testid="sites-continue"
         >
           Continue →
         </button>
       </div>
+
+      {mismatch && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+          data-testid="sites-mismatch-dialog"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg">
+            <h3 className="text-base font-semibold text-slate-900">
+              Site totals don&rsquo;t match the study targets
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Your assigned sites sum to{" "}
+              <strong>{mismatch.siteTotalRand}</strong> randomized /{" "}
+              <strong>{mismatch.siteTotalScreen}</strong> screened, but Basics is
+              set to <strong>{studyRand}</strong> /{" "}
+              <strong>{studyScreen}</strong>. Pick one to reconcile before
+              continuing.
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setMismatch(null)}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                data-testid="sites-mismatch-fix"
+              >
+                Back — fix site rows
+              </button>
+              <button
+                type="button"
+                onClick={acceptSiteTotalsAsStudy}
+                disabled={patchTargets.isPending}
+                className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                data-testid="sites-mismatch-update-study"
+              >
+                {patchTargets.isPending
+                  ? "Updating…"
+                  : `Update study to ${mismatch.siteTotalRand} / ${mismatch.siteTotalScreen}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

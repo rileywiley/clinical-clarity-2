@@ -29,6 +29,19 @@ class SiteTrialOut(BaseModel):
     active: bool
 
 
+class SiteTrialWithTrialOut(BaseModel):
+    """SiteTrial row + the parent trial's name/status, for the per-site view."""
+
+    id: UUID
+    site_id: UUID
+    trial_id: UUID
+    per_site_enrollment_target: int
+    per_site_screening_target: int
+    active: bool
+    trial_name: str
+    trial_status: str
+
+
 class VisitOverrideIn(BaseModel):
     visit_id: UUID
     duration_hours: float = Field(gt=0)

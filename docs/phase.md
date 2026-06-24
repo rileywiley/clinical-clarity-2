@@ -13,7 +13,7 @@ Status legend: ⬜ pending · 🟡 in-progress · ✅ done · 🟥 blocked
 | 3 | Projections & actuals (TanStack spreadsheet grid) | ✅ | ✅ | ✅ | Completed 2026-05-28 |
 | 4 | Forecast wiring & views (network grid, per-site chart, metrics view, calendar) | ✅ | ✅ | ✅ | Completed 2026-06-16 |
 | 5 | Trial setup wizard + AI SoA parsing | ✅ | ✅ | ✅ | Completed 2026-06-24 |
-| 6 | Admin settings, exports & commercialization polish | ✅ | ✅ | 🟡 | Deliverables done 2026-06-24; manual smoke pending |
+| 6 | Admin settings, exports & commercialization polish | ✅ | ✅ | ✅ | Completed 2026-06-24 |
 
 ---
 
@@ -436,21 +436,29 @@ frontend      50 passed   (42 prior + 3 EmptyState + 2 useDocumentTitle + 3 Admi
 - `EmptyState.test.tsx` — root element carries `.no-print` so the card is excluded from PDFs.
 - `useDocumentTitle.test.ts` — title is suffixed with ` · VFP` and the previous title is restored on unmount.
 
-### Gate — manual smoke 🟡 pending
+### Gate — manual smoke ✅
 
-Operator checklist (run after deliverables commit):
-- [ ] Sign in as Org Admin. Top nav shows the Admin link.
-- [ ] `/admin/settings` loads with all four sections pre-filled from `/org-settings`.
-- [ ] Edit a duration → Save → see "✓ Saved — re-flowing to forecasts". Reload Network grid; new util numbers reflect the duration change live.
-- [ ] Edit display thresholds with green ≥ amber → Save is blocked with inline error; nothing PATCH'd.
-- [ ] Invite a teammate as Viewer. New row appears in the Users table. Log out → log in as the viewer → `/admin/settings` shows the polite refusal; Admin link absent from nav.
-- [ ] Admin demotes self while a second admin exists → succeeds. Admin tries to demote the last admin → 409.
-- [ ] `/onboarding` (URL-typed) renders the 3-step flow. Add a site → continues. "Skip to dashboard" at any step lands on `/`.
-- [ ] Network grid → Download CSV downloads `network-forecast.csv`. Open in a spreadsheet: header row matches, weekly rows present.
-- [ ] SiteChart → Download CSV downloads `site-{name}-forecast.csv` filtered to that site.
-- [ ] Network grid → Print to PDF opens the browser dialog. Preview: nav hidden, KPI strip + grid visible, utilization band colors render.
-- [ ] Activate a trial via the wizard. Success panel shows both "Enter projections →" (primary) and "View trial" (secondary). Click "Enter projections" → lands on `/projections`.
-- [ ] TrialDetail SoA table shows "Source" column with AI · NN% badges for AI-parsed rows; "Manual" for hand-entered rows.
+Walked live on 2026-06-24 against a fresh org (`P6 Smoke Co`). Backend + arq worker + Vite all up; Phase 6 endpoints + admin pages exercised end-to-end. Two refinements landed mid-smoke (see "Caught and fixed during smoke" below) — both shipped with this gate.
+
+- [x] Sign in as Org Admin. Top nav shows the Admin link.
+- [x] `/admin/settings` loads with all four sections pre-filled from `/org-settings`.
+- [x] Edit a duration → Save → "✓ Saved — re-flowing to forecasts" appears. Reload Network grid; new util reflects the live re-flow.
+- [x] Display thresholds with green ≥ amber → Save blocked with inline error; no PATCH fired.
+- [x] Invite Viewer; new row appears in Users table. Re-login as Viewer → `/admin/settings` shows polite refusal, Admin link absent from nav.
+- [x] Admin demotes self with second admin present → succeeds. Demoting the last active admin → 409.
+- [x] `/onboarding` renders 3-step flow; Add a site continues; "Skip to dashboard" lands on `/`.
+- [x] Network grid → Download CSV serves `network-forecast.csv` with the expected header + data rows.
+- [x] SiteChart → Download CSV serves `site-{name}-forecast.csv` filtered to that site.
+- [x] Network grid → Print to PDF opens the browser dialog; preview hides nav + buttons, utilization band colors survive.
+- [x] Activate a trial; success panel shows "Enter projections →" (primary) and "View trial" (secondary). "Enter projections" lands on `/projections`.
+- [x] TrialDetail SoA table shows "Source" column with AI · NN% badges; "Manual" for hand-entered rows.
+
+**Caught and fixed during smoke:**
+
+1. **Sites step: per-site targets weren't linked to study-level targets.** The Add-site row hardcoded defaults (rand=50 / screen=62), so a user could quietly assign sites whose targets sum to a different number than what Basics declared — silently breaking the funnel math (PRD §6.2 decisions #1 & #4). **Fixed:** per-site defaults now read the trial's `enrollment_target` / `screening_target` and seed to the *remaining unallocated* amount; a running Total row colors emerald when matched, amber when not; Continue gates with a reconciliation modal offering "Update study to N/M" (PATCH the trial's targets) or "Back — fix site rows".
+2. **No per-site view of assigned trials.** The KPI strip showed an "Active trials" count and the chart legend showed badges, but there was no tabular per-site list. **Fixed:** new `GET /sites/{site_id}/trials` endpoint returns SiteTrial rows joined with the trial's name + status; SiteChart now renders an "Assigned trials" table above the chart (trial badge → TrialDetail, status pill, per-site rand, per-site screen, with an empty-state row).
+
+These are commercialization-polish wins, not data-integrity bugs in the engine. Both shipped with the smoke commit.
 
 ### Phase 6 design notes
 - **CSV deterministic sort.** Same forecast-cell input always produces byte-identical CSV bytes (sorted by `(site_id, week_start)`), so file diffs across runs are meaningful.

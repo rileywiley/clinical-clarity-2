@@ -62,6 +62,11 @@ export default function SiteChart() {
     queryKey: ["trials-active"],
     queryFn: api.listActiveTrials,
   });
+  const trialsAtSiteQ = useQuery({
+    queryKey: ["trials-at-site", siteId],
+    queryFn: () => api.listTrialsAtSite(siteId),
+    enabled: !!siteId,
+  });
 
   const site = sitesQ.data?.find((s) => s.id === siteId);
   useDocumentTitle(site ? site.name : "Site");
@@ -217,6 +222,55 @@ export default function SiteChart() {
         />
       </div>
 
+      <section className="mb-4 rounded border border-slate-200 bg-white">
+        <header className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+          <h2 className="text-sm font-medium text-slate-700">Assigned trials</h2>
+          <span className="text-xs text-slate-500">
+            {trialsAtSiteQ.data?.length ?? 0} total
+          </span>
+        </header>
+        <table className="w-full text-sm" data-testid="trials-at-site-table">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-600">
+            <tr>
+              <th className="px-3 py-2">Trial</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2 text-right">Per-site rand</th>
+              <th className="px-3 py-2 text-right">Per-site screen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(trialsAtSiteQ.data ?? []).map((row) => (
+              <tr key={row.id} className="border-t border-slate-100">
+                <td className="px-3 py-1.5">
+                  <Link
+                    to={`/trials/${row.trial_id}`}
+                    className="hover:underline"
+                  >
+                    <TrialColorBadge trialId={row.trial_id} name={row.trial_name} />
+                  </Link>
+                </td>
+                <td className="px-3 py-1.5 text-slate-600">
+                  <StatusPill status={row.trial_status} />
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  {row.per_site_enrollment_target}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  {row.per_site_screening_target}
+                </td>
+              </tr>
+            ))}
+            {(trialsAtSiteQ.data ?? []).length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-slate-500">
+                  No trials assigned to this site yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
       <div className="mb-3 flex items-center justify-between">
         <div
           className="inline-flex rounded border border-slate-300"
@@ -321,5 +375,19 @@ export default function SiteChart() {
         </ResponsiveContainer>
       </div>
     </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const cls =
+    status === "active"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : status === "draft"
+        ? "bg-slate-50 text-slate-700 border-slate-200"
+        : "bg-amber-50 text-amber-700 border-amber-200";
+  return (
+    <span className={`inline-block rounded border px-1.5 py-0.5 text-xs ${cls}`}>
+      {status}
+    </span>
   );
 }
