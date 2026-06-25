@@ -1,4 +1,4 @@
-# CLAUDE.md — Volume Forecasting Platform
+# CLAUDE.md — Clinical Clarity
 
 Operating contract for Claude Code on this project. Read every session. Keep it short.
 **`docs/prd.md` is the source of truth for *what* to build.** This file is *how* we work.

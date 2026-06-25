@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const SUFFIX = " · VFP";
+const SUFFIX = " · Clinical Clarity";
 
 export function useDocumentTitle(title: string | undefined | null) {
   useEffect(() => {

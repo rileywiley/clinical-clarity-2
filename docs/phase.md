@@ -405,7 +405,7 @@ Driven end-to-end by `frontend/e2e/phase5-smoke.spec.t` (Playwright + real Chrom
 - `pages/TrialWizard.tsx` (ActivateStep) — post-activation CTA: "Enter projections →" (primary) + "View trial" (secondary).
 - `pages/TrialDetail.tsx` — SoA table gains a "Source" column with a `ConfidenceBadge` (Manual / AI · NN%). Bands match the SoA review table (≥0.85 green, ≥0.6 amber, <0.6 red); `title` tooltip shows `flagged_reason`.
 - `components/EmptyState.tsx` — reusable empty-state card, marked `.no-print` so PDFs don't carry "no data yet" placeholders.
-- `hooks/useDocumentTitle.ts` — sets `document.title = "{title} · VFP"`; restores prior title on unmount.
+- `hooks/useDocumentTitle.ts` — sets `document.title = "{title} · Clinical Clarity"`; restores prior title on unmount.
 - `hooks/usePrintToPdf.ts` — thin wrapper around `window.print()`.
 - `print.css` — `@page` landscape, 0.5in margins; hides `.no-print`; `-webkit-print-color-adjust: exact` so utilization band colors survive print.
 - Export buttons — `Download CSV` + `Print to PDF` on NetworkGrid and SiteChart headers (both marked `.no-print`).
@@ -435,7 +435,7 @@ frontend      50 passed   (42 prior + 3 EmptyState + 2 useDocumentTitle + 3 Admi
 - `test_csv_rls_blocks_cross_org` — Org B's network CSV is header-only; Org B's request for Org A's site CSV returns 404.
 - `AdminSettings.test.tsx` — non-admins see the polite refusal and **never** call `getOrgSettings`. Admin save calls `patchOrgSettings` with the edited fields. Green ≥ amber blocks the display-defaults save.
 - `EmptyState.test.tsx` — root element carries `.no-print` so the card is excluded from PDFs.
-- `useDocumentTitle.test.ts` — title is suffixed with ` · VFP` and the previous title is restored on unmount.
+- `useDocumentTitle.test.ts` — title is suffixed with ` · Clinical Clarity` and the previous title is restored on unmount.
 
 ### Gate — manual smoke ✅
 

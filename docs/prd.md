@@ -1,4 +1,4 @@
-# Volume Forecasting Platform — Product Requirements Document (v1)
+# Clinical Clarity — Product Requirements Document (v1)
 
 > **Status:** Ready for implementation
 > **Audience:** Claude Code (implementer) and the product owner

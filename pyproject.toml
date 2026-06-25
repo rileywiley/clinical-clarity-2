@@ -1,7 +1,7 @@
 [project]
 name = "clinical-clarity-2"
 version = "0.1.0"
-description = "Volume Forecasting Platform — multi-tenant SaaS for clinical trial site networks"
+description = "Clinical Clarity — multi-tenant SaaS for clinical trial site networks (volume forecasting)"
 requires-python = ">=3.12,<3.13"
 
 # This root pyproject is workspace metadata only. The two real Python packages

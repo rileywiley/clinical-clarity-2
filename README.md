@@ -1,4 +1,4 @@
-# Volume Forecasting Platform
+# Clinical Clarity
 
 Multi-tenant SaaS that forecasts weekly clinical-trial visit volume per site vs. site capacity (room-hours), so a trial-network executive can decide where there's room to sell and where capacity is at risk.
 

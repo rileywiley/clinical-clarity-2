@@ -1,7 +1,7 @@
 [project]
 name = "engine"
 version = "0.1.0"
-description = "Pure-Python forecast engine for the Volume Forecasting Platform. Zero web/db/HTTP deps."
+description = "Pure-Python forecast engine for Clinical Clarity. Zero web/db/HTTP deps."
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "numpy>=1.26",

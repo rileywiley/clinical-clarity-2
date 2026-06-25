@@ -1,5 +1,5 @@
 /**
- * Phase 6 — useDocumentTitle sets `document.title` with the " · VFP" suffix
+ * Phase 6 — useDocumentTitle sets `document.title` with the " · Clinical Clarity" suffix
  * and restores the previous title on unmount so we don't leak page titles
  * across SPA navigations.
  */
@@ -16,13 +16,13 @@ afterEach(() => {
 describe("useDocumentTitle", () => {
   it("sets the title with the app suffix", () => {
     renderHook(() => useDocumentTitle("Network forecast"));
-    expect(document.title).toBe("Network forecast · VFP");
+    expect(document.title).toBe("Network forecast · Clinical Clarity");
   });
 
   it("restores the previous title on unmount", () => {
     document.title = "Original";
     const { unmount } = renderHook(() => useDocumentTitle("Site detail"));
-    expect(document.title).toBe("Site detail · VFP");
+    expect(document.title).toBe("Site detail · Clinical Clarity");
     unmount();
     expect(document.title).toBe("Original");
   });
