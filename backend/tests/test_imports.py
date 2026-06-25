@@ -14,6 +14,7 @@ from io import BytesIO
 
 import pytest
 from httpx import AsyncClient
+from openpyxl import Workbook, load_workbook
 
 from app.models.soa_parse_job import SoaParseJob  # noqa: F401 — register table
 
@@ -358,6 +359,87 @@ async def test_projections_upsert_overwrites_existing_week(
 
 # ---------------------------------------------------------------------------
 # Auth + RLS
+
+
+async def test_xlsx_template_trials_includes_site_reference_sheet(
+    client: AsyncClient, org: dict
+) -> None:
+    """The trials template's Reference sheet lists existing site + curve
+    names — this is the user's defense against typos like a trailing space."""
+    await _seed_two_sites_and_a_curve(client)
+    res = await client.get("/imports/templates/trials.xlsx")
+    assert res.status_code == 200
+    assert "spreadsheetml" in res.headers["content-type"]
+    wb = load_workbook(BytesIO(res.content))
+    assert wb.sheetnames == ["Template", "Reference"]
+
+    ref = wb["Reference"]
+    rows = [list(r) for r in ref.iter_rows(values_only=True)]
+    # Header row + one data row per site (we seeded 2, sorted).
+    assert rows[0] == ["Existing site names", "Existing attrition curve names"]
+    site_col = [r[0] for r in rows[1:]]
+    curve_col = [r[1] for r in rows[1:]]
+    assert site_col[:2] == ["S-A", "S-B"]
+    assert "Custom" in curve_col
+
+
+async def test_xlsx_template_projections_includes_trial_reference(
+    client: AsyncClient, org: dict
+) -> None:
+    """Projections Reference sheet lists existing trials so a user picks
+    the right trial_name (and arm_name on multi-arm trials)."""
+    await _seed_trial_with_arm(client)
+    res = await client.get("/imports/templates/projections.xlsx")
+    assert res.status_code == 200
+    wb = load_workbook(BytesIO(res.content))
+    ref = wb["Reference"]
+    rows = [list(r) for r in ref.iter_rows(values_only=True)]
+    flat = " | ".join(" | ".join(str(c or "") for c in r) for r in rows)
+    assert "PSite" in flat  # site name from seed
+    assert "PT" in flat  # trial name from seed
+    assert "Default Arm" in flat  # arm column
+
+
+async def test_xlsx_upload_round_trips_through_validator(
+    client: AsyncClient, org: dict
+) -> None:
+    """The user can fill in the downloaded XLSX and upload it directly —
+    the server normalizes XLSX → CSV before validation runs."""
+    # Build a small in-memory XLSX equivalent to a clean Sites CSV.
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Template"
+    ws.append(
+        ["name", "timezone", "operating_weekdays", "hours_per_day", "rooms"]
+    )
+    ws.append(["Alpha XLSX", "America/New_York", "Mon Tue Wed Thu Fri", 10, 2])
+    ws.append(["Beta XLSX", "America/Chicago", "0,1,2,3,4", 9, 1])
+    # Reference sheet — should be IGNORED on upload.
+    ref = wb.create_sheet("Reference")
+    ref.append(["should not", "be parsed"])
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    files = {
+        "file": (
+            "sites-filled.xlsx",
+            buf,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    pv = await client.post("/imports/sites/preview", files=files)
+    assert pv.status_code == 200, pv.text
+    body = pv.json()
+    assert body["ok"] is True
+    assert len(body["actions"]) == 2
+
+    buf.seek(0)
+    cm = await client.post("/imports/sites/commit", files=files)
+    assert cm.status_code == 200, cm.text
+    names = sorted(s["name"] for s in (await client.get("/sites")).json())
+    assert names == ["Alpha XLSX", "Beta XLSX"]
 
 
 async def test_preview_requires_admin(client: AsyncClient, org: dict) -> None:

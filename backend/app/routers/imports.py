@@ -19,6 +19,10 @@ from app.deps import get_current_user, get_db, require_role
 from app.models.user import User, UserRole
 from app.services import csv_import
 
+XLSX_MEDIA = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
 router = APIRouter(prefix="/imports", tags=["imports"])
 
 ADMIN_ONLY = (UserRole.ORG_ADMIN,)
@@ -34,19 +38,19 @@ def _check_kind(kind: str) -> csv_import.ImportKind:
     return kind  # type: ignore[return-value]
 
 
-async def _read_csv(file: UploadFile) -> str:
+async def _read_upload(file: UploadFile) -> str:
+    """Normalize CSV or XLSX upload to CSV text for the validator."""
     raw = await file.read()
-    # Excel saves with BOM by default; csv.DictReader trips on it.
-    text = raw.decode("utf-8-sig", errors="replace")
+    text = csv_import.normalize_upload(file.filename or "upload.csv", raw)
     if not text.strip():
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="uploaded CSV is empty"
+            status.HTTP_400_BAD_REQUEST, detail="uploaded file is empty"
         )
     return text
 
 
 @router.get("/templates/{kind}.csv")
-async def download_template(
+async def download_template_csv(
     kind: str,
     _user: User = Depends(get_current_user),
 ) -> Response:
@@ -56,6 +60,27 @@ async def download_template(
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{kind}-template.csv"'
+        },
+    )
+
+
+@router.get("/templates/{kind}.xlsx")
+async def download_template_xlsx(
+    kind: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Same template as the .csv endpoint, but as a 2-sheet workbook —
+    Template (header + example rows) plus a Reference sheet listing the
+    live names a user would otherwise have to remember (existing sites
+    for the trials template, existing trials/arms for projections)."""
+    k = _check_kind(kind)
+    body = await csv_import.template_xlsx_for(k, user.org_id, db)
+    return Response(
+        content=body,
+        media_type=XLSX_MEDIA,
+        headers={
+            "Content-Disposition": f'attachment; filename="{kind}-template.xlsx"'
         },
     )
 
@@ -71,7 +96,7 @@ async def preview(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     k = _check_kind(kind)
-    text = await _read_csv(file)
+    text = await _read_upload(file)
     result = await csv_import.preview(k, text, user.org_id, db)
     return {
         "ok": result.ok,
@@ -91,7 +116,7 @@ async def commit(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     k = _check_kind(kind)
-    text = await _read_csv(file)
+    text = await _read_upload(file)
     result = await csv_import.commit(k, text, user.org_id, db)
     if not result.ok:
         # The single-transaction guarantee: nothing was written. Surface a

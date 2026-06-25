@@ -28,9 +28,9 @@ const KIND_HINT: Record<Kind, string> = {
   sites:
     "One row per site. operating_weekdays accepts \"Mon Tue Wed Thu Fri\" or \"0,1,2,3,4\".",
   trials:
-    "One row per (trial, site) assignment. Trial-level fields can be left blank on rows 2+ for the same trial (inherit). Sum of per-site targets must equal the study targets. Imports as draft.",
+    "One row per (trial, site) assignment. Trial-level fields can be left blank on rows 2+ for the same trial (inherit). Sum of per-site targets must equal the study targets. Imports as draft. The XLSX template's Reference sheet lists your existing site names so you can paste them in exactly.",
   projections:
-    "One row per (site, trial, arm, week). week_start must be a Monday. arm_name left blank → \"Default Arm\". Re-uploading an existing week overwrites the projection (actuals untouched).",
+    "One row per (site, trial, arm, week). week_start must be a Monday. arm_name left blank → \"Default Arm\". Re-uploading an existing week overwrites the projection (actuals untouched). The XLSX template's Reference sheet lists your existing trial + arm names.",
 };
 
 export default function Import({ me }: { me: Me }) {
@@ -168,17 +168,24 @@ function ImportPanel({ kind }: { kind: Kind }) {
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <a
-          href={api.importTemplateUrl(kind)}
+          href={api.importTemplateUrl(kind, "xlsx")}
           className="rounded border border-slate-300 px-3 py-1.5 text-sm"
           data-testid={`import-${kind}-download-template`}
         >
-          Download {KIND_LABEL[kind]} template
+          Download {KIND_LABEL[kind]} template (.xlsx)
+        </a>
+        <a
+          href={api.importTemplateUrl(kind, "csv")}
+          className="text-xs text-slate-500 underline"
+          data-testid={`import-${kind}-download-csv`}
+        >
+          (or CSV)
         </a>
         <label className="text-sm text-slate-700">
-          <span className="mr-2">CSV file:</span>
+          <span className="mr-2">File:</span>
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
               setPreview(null);

@@ -19,6 +19,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +83,156 @@ _TEMPLATES: dict[ImportKind, str] = {
 
 def template_for(kind: ImportKind) -> str:
     return _TEMPLATES[kind]
+
+
+# ---------------------------------------------------------------------------
+# XLSX templates — same data as the CSV templates, but with a second
+# **Reference** sheet that lists the existing org-scoped names a user
+# needs to type into the template (sites for trials, trials for
+# projections). This is what stops the most common upload error
+# ("unknown site 'NYU Langone '" because of a trailing space or a typo).
+
+
+def _set_header_style(ws) -> None:
+    from openpyxl.styles import Font, PatternFill
+
+    fill = PatternFill("solid", fgColor="E2E8F0")  # slate-200
+    bold = Font(bold=True)
+    for cell in ws[1]:
+        cell.fill = fill
+        cell.font = bold
+
+
+def _autosize(ws) -> None:
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=0)
+        ws.column_dimensions[col[0].column_letter].width = min(max(12, max_len + 2), 40)
+
+
+async def template_xlsx_for(
+    kind: ImportKind, org_id: UUID, db: AsyncSession
+) -> bytes:
+    """Build the kind's XLSX template, populating the Reference sheet with
+    live names from the org. Returns the binary .xlsx bytes."""
+    wb = Workbook()
+    data_ws = wb.active
+    assert data_ws is not None
+    data_ws.title = "Template"
+
+    # Mirror the CSV template — header + example rows.
+    reader = csv.reader(io.StringIO(_TEMPLATES[kind]))
+    for row in reader:
+        data_ws.append(row)
+    _set_header_style(data_ws)
+    _autosize(data_ws)
+
+    # Reference sheet — what the user needs to type into the data sheet.
+    ref_ws = wb.create_sheet("Reference")
+    if kind == "trials":
+        sites = (
+            await db.execute(
+                select(Site.name).where(Site.org_id == org_id).order_by(Site.name)
+            )
+        ).scalars().all()
+        curves = (
+            await db.execute(
+                select(AttritionCurve.name)
+                .where(AttritionCurve.org_id == org_id)
+                .order_by(AttritionCurve.name)
+            )
+        ).scalars().all()
+        ref_ws.append(["Existing site names", "Existing attrition curve names"])
+        for i in range(max(len(sites), len(curves))):
+            ref_ws.append(
+                [
+                    sites[i] if i < len(sites) else "",
+                    curves[i] if i < len(curves) else "",
+                ]
+            )
+        if not sites and not curves:
+            ref_ws.append(["(no sites yet — create one first)", ""])
+    elif kind == "projections":
+        # Trials + arms, so the user can pick the right arm name on
+        # multi-arm trials (rare in v1, but the column exists).
+        trials = (
+            await db.execute(
+                select(Trial.id, Trial.name, Trial.status)
+                .where(Trial.org_id == org_id)
+                .order_by(Trial.name)
+            )
+        ).all()
+        sites = (
+            await db.execute(
+                select(Site.name).where(Site.org_id == org_id).order_by(Site.name)
+            )
+        ).scalars().all()
+        arms_by_trial: dict[UUID, list[str]] = {}
+        for arm in (
+            await db.execute(select(Arm).where(Arm.org_id == org_id))
+        ).scalars().all():
+            arms_by_trial.setdefault(arm.trial_id, []).append(arm.name)
+
+        ref_ws.append(["Existing site names"])
+        for s in sites:
+            ref_ws.append([s])
+        ref_ws.append([])
+        ref_ws.append(["Existing trial names", "Status", "Arm name(s)"])
+        for tid, tname, tstatus in trials:
+            arms = ", ".join(sorted(arms_by_trial.get(tid, []))) or "Default Arm"
+            ref_ws.append([tname, tstatus.value if hasattr(tstatus, "value") else str(tstatus), arms])
+        if not trials:
+            ref_ws.append(["(no trials yet — create one first)", "", ""])
+    else:
+        # Sites template needs no reference data — nothing exists to
+        # collide with. Show a small note instead so users aren't
+        # confused by an empty sheet.
+        ref_ws.append(
+            ["The Sites template needs no reference — site names are unique within an org."]
+        )
+
+    _set_header_style(ref_ws)
+    _autosize(ref_ws)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Upload normalization — let users hand us either CSV bytes or the
+# XLSX template back (whether or not they edited the Reference sheet).
+# Everything downstream operates on a CSV string.
+
+
+def normalize_upload(filename: str, raw: bytes) -> str:
+    """Return CSV text for the validator. Detects XLSX by extension; if
+    given a .xlsx, reads the **first** sheet (which is always 'Template'
+    in our generated workbooks; users may also rename it). The Reference
+    sheet is ignored on upload."""
+    is_xlsx = filename.lower().endswith(".xlsx")
+    # openpyxl reads .xlsx; passing CSV bytes through would crash, so we
+    # branch on extension. (Sniffing magic bytes is brittle.)
+    if not is_xlsx:
+        return raw.decode("utf-8-sig", errors="replace")
+    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    ws = wb.worksheets[0]
+    out = io.StringIO()
+    writer = csv.writer(out)
+    for row in ws.iter_rows(values_only=True):
+        if all(v is None or v == "" for v in row):
+            continue
+        writer.writerow(["" if v is None else _xlsx_cell_to_str(v) for v in row])
+    return out.getvalue()
+
+
+def _xlsx_cell_to_str(v: object) -> str:
+    """Excel dates round-trip as datetime objects; we need ISO strings
+    back so the existing date validator stays happy."""
+    if isinstance(v, datetime):
+        return v.date().isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    return str(v)
 
 
 # ---------------------------------------------------------------------------

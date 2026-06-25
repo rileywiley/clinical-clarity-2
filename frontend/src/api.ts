@@ -454,9 +454,14 @@ export const api = {
   unassignUserFromSite: (siteId: string, userId: string) =>
     request<void>(`/sites/${siteId}/users/${userId}`, { method: "DELETE" }),
 
-  // Post-Phase-6 — bulk CSV import (sites / trials / projections)
-  importTemplateUrl: (kind: "sites" | "trials" | "projections") =>
-    `/api/imports/templates/${kind}.csv`,
+  // Post-Phase-6 — bulk CSV import (sites / trials / projections).
+  // XLSX is the default download (it carries the Reference sheet listing
+  // existing site/trial names so users avoid typos). CSV stays available
+  // for power-users who'd rather edit in a plain text editor.
+  importTemplateUrl: (
+    kind: "sites" | "trials" | "projections",
+    fmt: "xlsx" | "csv" = "xlsx",
+  ) => `/api/imports/templates/${kind}.${fmt}`,
   previewImport: async (
     kind: "sites" | "trials" | "projections",
     file: File,

@@ -503,3 +503,5 @@ These are out-of-PRD enhancements shipped after the seven-phase gated build. The
 - Frontend (3): non-admin refusal, preview errors disable Commit, clean preview → commit → success panel.
 
 **Out of scope:** SoA visit rows (the AI parser is the right path for those); trial activation from import (always draft); CTMS-style polling (one-shot upload).
+
+**Follow-up (2026-06-24):** templates switched from CSV-only to **XLSX with a Reference sheet** — trials template lists existing site + curve names; projections template lists existing trial + arm names. CSV templates stay available at `/imports/templates/{kind}.csv` for power-users. Upload endpoints normalize either format to CSV internally (openpyxl reads `.xlsx`; everything downstream operates on CSV strings). Reasoning: the most common upload failure was "unknown site 'NYU Langone '" from trailing whitespace or a typo — putting the live source-of-truth names a tab away from where the user types kills the entire failure class.
