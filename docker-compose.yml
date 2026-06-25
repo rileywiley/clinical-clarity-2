@@ -96,6 +96,9 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      # Mount the local engine package so engine edits hot-reload too (the image
+      # bakes it at /engine; uvicorn watches /engine via --reload-dir in the CMD).
+      - ./engine:/engine:ro
 
   # arq worker — runs background jobs (Phase 5: SoA parsing via Claude).
   worker:
@@ -121,6 +124,9 @@ services:
     command: ["arq", "app.worker.WorkerSettings"]
     volumes:
       - ./backend:/app
+      # Same engine mount as backend. arq has no live reload, so engine (or
+      # worker) edits need a `docker-compose restart worker` — but no rebuild.
+      - ./engine:/engine:ro
 
   frontend:
     build:
