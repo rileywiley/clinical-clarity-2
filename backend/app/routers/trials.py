@@ -3,13 +3,18 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db, require_role
+from app.models.enrollment_week import EnrollmentWeek
 from app.models.org_settings import OrgSettings
+from app.models.site_trial import SiteTrial
+from app.models.soa_snapshot import SoaSnapshot
 from app.models.trial import Arm, Trial, TrialStatus
 from app.models.user import User, UserRole
+from app.models.visit import Visit
 from app.schemas.arm import ArmIn, ArmOut, ArmPatch
 from app.schemas.trial import (
     TrialActivationErrorOut,
@@ -155,6 +160,122 @@ async def activate_trial(
         )
     t.status = TrialStatus.ACTIVE
     return t
+
+
+# --- Archive + Delete (admin-only) -------------------------------------
+
+ADMIN_ONLY = (UserRole.ORG_ADMIN,)
+
+
+class TrialDeleteImpactOut(BaseModel):
+    """Counts of dependent rows that a DELETE on this trial would cascade to.
+    Surfaced to the UI so the user sees what they're about to destroy.
+    """
+
+    trial_name: str
+    status: str
+    arms: int
+    visits: int
+    site_assignments: int
+    enrollment_weeks: int
+    soa_snapshots: int
+
+
+@router.post(
+    "/{trial_id}/archive",
+    response_model=TrialOut,
+    dependencies=[Depends(require_role(*WRITE_ROLES))],
+)
+async def archive_trial(
+    trial_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Trial:
+    """Move a trial to ``archived`` status. Required step before delete on
+    an active trial — the active-delete block is the primary safety net
+    against silently wiping live forecast contribution."""
+    t = await db.get(Trial, trial_id)
+    if t is None or t.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    t.status = TrialStatus.ARCHIVED
+    return t
+
+
+@router.get(
+    "/{trial_id}/delete-impact",
+    response_model=TrialDeleteImpactOut,
+)
+async def trial_delete_impact(
+    trial_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TrialDeleteImpactOut:
+    t = await db.get(Trial, trial_id)
+    if t is None or t.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    arm_ids = (
+        await db.execute(select(Arm.id).where(Arm.trial_id == trial_id))
+    ).scalars().all()
+    visit_count = 0
+    if arm_ids:
+        visit_count = (
+            await db.execute(
+                select(func.count(Visit.id)).where(Visit.arm_id.in_(arm_ids))
+            )
+        ).scalar_one()
+    site_assignments = (
+        await db.execute(
+            select(func.count(SiteTrial.id)).where(SiteTrial.trial_id == trial_id)
+        )
+    ).scalar_one()
+    enrollment_weeks = (
+        await db.execute(
+            select(func.count(EnrollmentWeek.id)).where(
+                EnrollmentWeek.trial_id == trial_id
+            )
+        )
+    ).scalar_one()
+    snapshot_count = (
+        await db.execute(
+            select(func.count(SoaSnapshot.id)).where(
+                SoaSnapshot.trial_id == trial_id
+            )
+        )
+    ).scalar_one()
+    return TrialDeleteImpactOut(
+        trial_name=t.name,
+        status=t.status.value,
+        arms=len(arm_ids),
+        visits=visit_count,
+        site_assignments=site_assignments,
+        enrollment_weeks=enrollment_weeks,
+        soa_snapshots=snapshot_count,
+    )
+
+
+@router.delete(
+    "/{trial_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role(*ADMIN_ONLY))],
+)
+async def delete_trial(
+    trial_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Hard-delete a trial + all its arms / visits / assignments / weeks /
+    snapshots (FK cascades). Blocked while the trial is active — the
+    operator must archive it first, which is the load-bearing safety
+    against fat-fingering an active trial out of existence."""
+    t = await db.get(Trial, trial_id)
+    if t is None or t.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if t.status is TrialStatus.ACTIVE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="active trials cannot be deleted; archive first",
+        )
+    await db.delete(t)
 
 
 # --- Arms (nested under a trial) ----------------------------------------

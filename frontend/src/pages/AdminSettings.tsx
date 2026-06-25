@@ -48,6 +48,7 @@ export default function AdminSettings({ me }: { me: Me }) {
       <DisplayDefaults />
       <OrgDefaults />
       <UserManagement />
+      <DangerZone />
     </div>
   );
 }
@@ -498,6 +499,408 @@ function NumField({
     </label>
   );
 }
+
+// --- 5. Danger zone — delete sites & studies ----------------------------
+
+function DangerZone() {
+  const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  const trialsQ = useQuery({ queryKey: ["trials"], queryFn: api.listTrials });
+  const [pending, setPending] = useState<
+    | { kind: "site"; id: string; name: string }
+    | { kind: "trial"; id: string; name: string; status: string }
+    | null
+  >(null);
+
+  return (
+    <Section
+      title="Danger zone"
+      hint="Permanently delete sites and studies. Deletes cascade — sites take their assignments + projection weeks; trials take their arms, visits, assignments, weeks, and snapshot history. There is no undo."
+    >
+      <div className="space-y-5">
+        <DeleteTable
+          title="Sites"
+          rows={(sitesQ.data ?? []).map((s) => ({
+            id: s.id,
+            name: s.name,
+            sub: s.timezone,
+            disabled: false,
+          }))}
+          emptyText="No sites in this org."
+          onDelete={(row) =>
+            setPending({ kind: "site", id: row.id, name: row.name })
+          }
+          dataTestidPrefix="danger-site"
+        />
+
+        <DeleteTable
+          title="Studies"
+          rows={(trialsQ.data ?? []).map((t) => ({
+            id: t.id,
+            name: t.name,
+            sub: t.status,
+            disabled: false,
+          }))}
+          emptyText="No trials in this org."
+          onDelete={(row) => {
+            const t = (trialsQ.data ?? []).find((x) => x.id === row.id)!;
+            setPending({
+              kind: "trial",
+              id: t.id,
+              name: t.name,
+              status: t.status,
+            });
+          }}
+          dataTestidPrefix="danger-trial"
+        />
+      </div>
+
+      {pending?.kind === "site" && (
+        <DeleteSiteModal
+          siteId={pending.id}
+          siteName={pending.name}
+          onClose={() => setPending(null)}
+        />
+      )}
+      {pending?.kind === "trial" && (
+        <DeleteTrialModal
+          trialId={pending.id}
+          trialName={pending.name}
+          trialStatus={pending.status}
+          onClose={() => setPending(null)}
+        />
+      )}
+    </Section>
+  );
+}
+
+function DeleteTable({
+  title,
+  rows,
+  emptyText,
+  onDelete,
+  dataTestidPrefix,
+}: {
+  title: string;
+  rows: Array<{ id: string; name: string; sub: string; disabled: boolean }>;
+  emptyText: string;
+  onDelete: (row: { id: string; name: string }) => void;
+  dataTestidPrefix: string;
+}) {
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-medium text-slate-700">{title}</h3>
+      <div className="overflow-x-auto rounded border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-600">
+            <tr>
+              <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">&nbsp;</th>
+              <th className="px-3 py-2 text-right">&nbsp;</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-3 py-4 text-center text-slate-500">
+                  {emptyText}
+                </td>
+              </tr>
+            )}
+            {rows.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="px-3 py-1.5">{r.name}</td>
+                <td className="px-3 py-1.5 text-xs text-slate-500">{r.sub}</td>
+                <td className="px-3 py-1.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onDelete(r)}
+                    disabled={r.disabled}
+                    className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40"
+                    data-testid={`${dataTestidPrefix}-delete-${r.id}`}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DeleteSiteModal({
+  siteId,
+  siteName,
+  onClose,
+}: {
+  siteId: string;
+  siteName: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const impactQ = useQuery({
+    queryKey: ["site-delete-impact", siteId],
+    queryFn: () => api.getSiteDeleteImpact(siteId),
+  });
+  const [typed, setTyped] = useState("");
+  const [status, setStatus] = useState<"idle" | "deleting" | "error">("idle");
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  async function doDelete() {
+    setStatus("deleting");
+    setErrorText(null);
+    try {
+      await api.deleteSite(siteId);
+      qc.invalidateQueries({ queryKey: ["sites"] });
+      qc.invalidateQueries({ queryKey: ["trials"] });
+      qc.invalidateQueries({ queryKey: ["forecast-network"] });
+      qc.invalidateQueries({ queryKey: ["site-forecast"] });
+      onClose();
+    } catch (err) {
+      setStatus("error");
+      setErrorText(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
+  return (
+    <ConfirmModal
+      title={`Delete site "${siteName}"?`}
+      confirmDisabled={typed !== siteName || status === "deleting"}
+      confirmLabel={status === "deleting" ? "Deleting…" : "Delete"}
+      onConfirm={doDelete}
+      onClose={onClose}
+      dataTestid="danger-site-modal"
+    >
+      {impactQ.data ? (
+        <ImpactList
+          rows={[
+            ["Trial assignments", impactQ.data.trial_assignments],
+            ["Projection weeks", impactQ.data.enrollment_weeks],
+            ["User assignments", impactQ.data.user_assignments],
+          ]}
+        />
+      ) : (
+        <p className="text-sm text-slate-500">Loading impact…</p>
+      )}
+      <TypeToConfirm
+        expected={siteName}
+        value={typed}
+        onChange={setTyped}
+        dataTestid="danger-site-type-confirm"
+      />
+      {errorText && (
+        <p className="mt-2 text-sm text-red-700">{errorText}</p>
+      )}
+    </ConfirmModal>
+  );
+}
+
+function DeleteTrialModal({
+  trialId,
+  trialName,
+  trialStatus,
+  onClose,
+}: {
+  trialId: string;
+  trialName: string;
+  trialStatus: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const impactQ = useQuery({
+    queryKey: ["trial-delete-impact", trialId],
+    queryFn: () => api.getTrialDeleteImpact(trialId),
+  });
+  const [typed, setTyped] = useState("");
+  const [status, setStatus] = useState<"idle" | "deleting" | "archiving" | "error">(
+    "idle",
+  );
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const isActive = (impactQ.data?.status ?? trialStatus) === "active";
+
+  async function archive() {
+    setStatus("archiving");
+    setErrorText(null);
+    try {
+      await api.archiveTrial(trialId);
+      qc.invalidateQueries({ queryKey: ["trials"] });
+      qc.invalidateQueries({ queryKey: ["trial-delete-impact", trialId] });
+      qc.invalidateQueries({ queryKey: ["forecast-network"] });
+      setStatus("idle");
+    } catch (err) {
+      setStatus("error");
+      setErrorText(err instanceof Error ? err.message : "Archive failed.");
+    }
+  }
+
+  async function doDelete() {
+    setStatus("deleting");
+    setErrorText(null);
+    try {
+      await api.deleteTrial(trialId);
+      qc.invalidateQueries({ queryKey: ["trials"] });
+      qc.invalidateQueries({ queryKey: ["forecast-network"] });
+      qc.invalidateQueries({ queryKey: ["site-forecast"] });
+      qc.invalidateQueries({ queryKey: ["trials-active"] });
+      onClose();
+    } catch (err) {
+      setStatus("error");
+      setErrorText(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
+  return (
+    <ConfirmModal
+      title={`Delete trial "${trialName}"?`}
+      confirmDisabled={
+        isActive || typed !== trialName || status === "deleting"
+      }
+      confirmLabel={status === "deleting" ? "Deleting…" : "Delete"}
+      onConfirm={doDelete}
+      onClose={onClose}
+      dataTestid="danger-trial-modal"
+    >
+      {isActive && (
+        <div
+          className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+          data-testid="danger-trial-active-block"
+        >
+          <strong>This trial is active.</strong> Active trials can't be deleted —
+          archive first to avoid silently wiping live forecast contribution.
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={archive}
+              disabled={status === "archiving"}
+              className="rounded border border-amber-400 bg-white px-2 py-0.5 text-xs text-amber-900 disabled:opacity-40"
+              data-testid="danger-trial-archive"
+            >
+              {status === "archiving" ? "Archiving…" : "Archive now"}
+            </button>
+          </div>
+        </div>
+      )}
+      {impactQ.data ? (
+        <ImpactList
+          rows={[
+            ["Arms", impactQ.data.arms],
+            ["Visits (SoA rows)", impactQ.data.visits],
+            ["Site assignments", impactQ.data.site_assignments],
+            ["Projection weeks", impactQ.data.enrollment_weeks],
+            ["SoA snapshots", impactQ.data.soa_snapshots],
+          ]}
+        />
+      ) : (
+        <p className="text-sm text-slate-500">Loading impact…</p>
+      )}
+      {!isActive && (
+        <TypeToConfirm
+          expected={trialName}
+          value={typed}
+          onChange={setTyped}
+          dataTestid="danger-trial-type-confirm"
+        />
+      )}
+      {errorText && (
+        <p className="mt-2 text-sm text-red-700">{errorText}</p>
+      )}
+    </ConfirmModal>
+  );
+}
+
+function ImpactList({ rows }: { rows: Array<[string, number]> }) {
+  return (
+    <ul className="mb-3 list-disc space-y-0.5 pl-5 text-sm text-slate-700">
+      {rows.map(([label, n]) => (
+        <li key={label} className={n > 0 ? "" : "text-slate-400"}>
+          {label}: <strong>{n}</strong>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function TypeToConfirm({
+  expected,
+  value,
+  onChange,
+  dataTestid,
+}: {
+  expected: string;
+  value: string;
+  onChange: (s: string) => void;
+  dataTestid?: string;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="block text-xs font-medium text-slate-600">
+        Type <code className="rounded bg-slate-100 px-1 text-xs">{expected}</code>{" "}
+        to confirm:
+      </span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5 font-mono"
+        data-testid={dataTestid}
+        autoFocus
+      />
+    </label>
+  );
+}
+
+function ConfirmModal({
+  title,
+  children,
+  confirmDisabled,
+  confirmLabel,
+  onConfirm,
+  onClose,
+  dataTestid,
+}: {
+  title: string;
+  children: React.ReactNode;
+  confirmDisabled: boolean;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onClose: () => void;
+  dataTestid?: string;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+      data-testid={dataTestid}
+    >
+      <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-lg">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">{title}</h3>
+        {children}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={confirmDisabled}
+            className="rounded bg-red-700 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+            data-testid="confirm-delete-button"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Shared row helper --------------------------------------------------
 
 function SaveRow({
   status,

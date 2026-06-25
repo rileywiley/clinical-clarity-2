@@ -458,6 +458,34 @@ export const api = {
   unassignUserFromSite: (siteId: string, userId: string) =>
     request<void>(`/sites/${siteId}/users/${userId}`, { method: "DELETE" }),
 
+  // Post-Phase-6 — danger zone: delete sites + trials (admin-only).
+  // Both endpoints expose a `delete-impact` GET so the UI can summarize
+  // cascades before the user confirms. Trials block delete while active —
+  // operator must archive first.
+  getSiteDeleteImpact: (siteId: string) =>
+    request<{
+      site_name: string;
+      trial_assignments: number;
+      enrollment_weeks: number;
+      user_assignments: number;
+    }>(`/sites/${siteId}/delete-impact`),
+  deleteSite: (siteId: string) =>
+    request<void>(`/sites/${siteId}`, { method: "DELETE" }),
+  getTrialDeleteImpact: (trialId: string) =>
+    request<{
+      trial_name: string;
+      status: string;
+      arms: number;
+      visits: number;
+      site_assignments: number;
+      enrollment_weeks: number;
+      soa_snapshots: number;
+    }>(`/trials/${trialId}/delete-impact`),
+  archiveTrial: (trialId: string) =>
+    request<TrialOut>(`/trials/${trialId}/archive`, { method: "POST" }),
+  deleteTrial: (trialId: string) =>
+    request<void>(`/trials/${trialId}`, { method: "DELETE" }),
+
   // Post-Phase-6 — SoA snapshots (revert a bad re-parse, take manual ones)
   listSoaSnapshots: (trialId: string) =>
     request<

@@ -3,12 +3,16 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db, require_role
+from app.models.enrollment_week import EnrollmentWeek
 from app.models.site import Site
+from app.models.site_trial import SiteTrial
 from app.models.user import User, UserRole
+from app.models.user_site_assignment import UserSiteAssignment
 from app.schemas.site import SiteIn, SiteOut, SitePatch
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -83,6 +87,55 @@ async def patch_site(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(s, field, value)
     return s
+
+
+class SiteDeleteImpactOut(BaseModel):
+    """Counts of dependents a DELETE on this site would cascade to.
+    Surfaced to the UI so the user sees what they're about to wipe."""
+
+    site_name: str
+    trial_assignments: int
+    enrollment_weeks: int
+    user_assignments: int
+
+
+@router.get(
+    "/{site_id}/delete-impact",
+    response_model=SiteDeleteImpactOut,
+)
+async def site_delete_impact(
+    site_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteDeleteImpactOut:
+    s = await db.get(Site, site_id)
+    if s is None or s.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    trial_assignments = (
+        await db.execute(
+            select(func.count(SiteTrial.id)).where(SiteTrial.site_id == site_id)
+        )
+    ).scalar_one()
+    enrollment_weeks = (
+        await db.execute(
+            select(func.count(EnrollmentWeek.id)).where(
+                EnrollmentWeek.site_id == site_id
+            )
+        )
+    ).scalar_one()
+    user_assignments = (
+        await db.execute(
+            select(func.count(UserSiteAssignment.id)).where(
+                UserSiteAssignment.site_id == site_id
+            )
+        )
+    ).scalar_one()
+    return SiteDeleteImpactOut(
+        site_name=s.name,
+        trial_assignments=trial_assignments,
+        enrollment_weeks=enrollment_weeks,
+        user_assignments=user_assignments,
+    )
 
 
 @router.delete(

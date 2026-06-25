@@ -536,3 +536,25 @@ These are out-of-PRD enhancements shipped after the seven-phase gated build. The
 - `api.ts` — `listSoaSnapshots`, `createSoaSnapshot`, `restoreSoaSnapshot`; `applyParseJob` adds `replace_existing?` param.
 
 **Tests:** backend 66 pass (+3 snapshot tests — manual creation captures current SoA, restore replaces + takes pre_restore snapshot, snapshots are org-scoped via RLS). Engine 30. Frontend 53 (no new tests for the rewrite — covered by existing TrialDetail render + the load-bearing snapshot path is backend-tested).
+
+### Delete sites & studies from Admin (2026-06-25)
+
+**What:** Admin Settings gains a **Danger zone** section listing every site and trial in the org with a per-row Delete button. The flow is impact-summary → type-to-confirm → cascade delete.
+
+**Locked decisions:**
+1. **Active trials cannot be deleted.** Backend returns 409; the modal renders an inline Archive button instead of the type-to-confirm input. The archive-first rule is the primary safety net against silently wiping live forecast contribution.
+2. **Type-to-confirm guard for both sites and trials, always.** Consistent destructive-action UX — sites can be load-bearing dependencies of multiple trials, so the guard applies equally.
+3. **Cascade is real (hard delete).** Sites take their SiteTrial assignments + EnrollmentWeek rows. Trials take their arms, visits, assignments, weeks, and snapshot history. FK `ondelete="CASCADE"` already in place from prior migrations — no schema change needed.
+4. **Both endpoints expose `delete-impact`** GETs returning counts the UI shows before confirm (`trial_assignments`, `enrollment_weeks`, `user_assignments` for sites; `arms`, `visits`, `site_assignments`, `enrollment_weeks`, `soa_snapshots` for trials).
+
+**Backend:**
+- `routers/trials.py` — `DELETE /trials/{id}` (admin-only, 409 on active), `POST /trials/{id}/archive` (sets status=archived), `GET /trials/{id}/delete-impact`.
+- `routers/sites.py` — `GET /sites/{id}/delete-impact` (DELETE was already there).
+- 7 tests in `test_admin_delete.py`: active-delete blocked, archive-then-delete cascades, impact counts correct (site + trial), site delete cascades to SiteTrial + EnrollmentWeek, ops_lead may archive but not delete (admin-only), org-scoped (RLS).
+
+**Frontend:**
+- `pages/AdminSettings.tsx` — new `DangerZone` section + `DeleteSiteModal`, `DeleteTrialModal`, `TypeToConfirm`, `ConfirmModal`, `ImpactList` helpers.
+- `api.ts` — `getSiteDeleteImpact`, `deleteSite`, `getTrialDeleteImpact`, `archiveTrial`, `deleteTrial`.
+- 2 vitest cases: active-trial modal shows the archive block (no type-to-confirm input), site delete modal enables Confirm only after the exact name is typed.
+
+**Tests:** backend 73 (+7), engine 30, frontend 55 (+2).
