@@ -132,6 +132,11 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+    environment:
+      # The Vite dev-server proxy forwards /api/* to the backend. Inside this
+      # container `localhost` is the frontend itself, so target the backend
+      # service over the compose network instead of the host default.
+      VITE_API_TARGET: http://backend:8000
     ports:
       - "5173:5173"
     volumes:
