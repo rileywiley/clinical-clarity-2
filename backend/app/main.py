@@ -14,6 +14,7 @@ from app.routers import (
     org_settings,
     orgs,
     site_trials,
+    soa_snapshots,
     sites,
     trials,
     users,
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(exports.router)
     app.include_router(imports.router)
+    app.include_router(soa_snapshots.router)
     return app
 
 

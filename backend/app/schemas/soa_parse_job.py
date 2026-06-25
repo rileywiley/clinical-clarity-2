@@ -47,3 +47,9 @@ class SoaParseJobApplyIn(BaseModel):
     # applying. We accept the full payload back rather than just "use what's
     # stored" — that's the whole point of the review step.
     visits: list[ParsedVisitOut]
+    # When True, a snapshot of the arm's existing visits is taken and then
+    # every existing visit on the arm is deleted before the new ones are
+    # written. The default (False) appends, matching the wizard's "create
+    # new trial" flow where the arm starts empty. Re-parses from
+    # TrialDetail set this to True so the user gets a clean redo.
+    replace_existing: bool = False

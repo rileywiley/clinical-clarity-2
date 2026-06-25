@@ -7,6 +7,7 @@ from app.models.org_settings import OrgSettings
 from app.models.site import Site
 from app.models.site_trial import SiteTrial, SiteTrialVisitOverride
 from app.models.soa_parse_job import SoaParseJob, SoaParseJobStatus
+from app.models.soa_snapshot import SoaSnapshot
 from app.models.trial import Arm, Trial, TrialStatus
 from app.models.user import User, UserRole
 from app.models.user_site_assignment import UserSiteAssignment
@@ -29,6 +30,7 @@ __all__ = [
     "SiteTrialVisitOverride",
     "SoaParseJob",
     "SoaParseJobStatus",
+    "SoaSnapshot",
     "TimestampMixin",
     "Trial",
     "TrialStatus",

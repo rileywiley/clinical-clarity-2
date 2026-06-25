@@ -505,3 +505,34 @@ These are out-of-PRD enhancements shipped after the seven-phase gated build. The
 **Out of scope:** SoA visit rows (the AI parser is the right path for those); trial activation from import (always draft); CTMS-style polling (one-shot upload).
 
 **Follow-up (2026-06-24):** templates switched from CSV-only to **XLSX with a Reference sheet** — trials template lists existing site + curve names; projections template lists existing trial + arm names. CSV templates stay available at `/imports/templates/{kind}.csv` for power-users. Upload endpoints normalize either format to CSV internally (openpyxl reads `.xlsx`; everything downstream operates on CSV strings). Reasoning: the most common upload failure was "unknown site 'NYU Langone '" from trailing whitespace or a typo — putting the live source-of-truth names a tab away from where the user types kills the entire failure class.
+
+### Studies dashboard + per-trial editing + SoA snapshots (2026-06-24)
+
+**What:** Top-nav **Studies** link → `/studies` dashboard listing every trial grouped by status (Active / Draft / Archived). Click any row to land on the existing TrialDetail page, which now hosts the full edit surface:
+- **Edit details** modal — trial-level fields (name, FPFV/LPFV/LPLV, targets, attrition curve). Active trials show a warning banner: *"Edits re-flow live to forecasts (PRD §5.2)"* — we don't block edits, since the everyday case is fixing a typo on an active trial.
+- **Edit SoA** — inline editable table (per-row inputs for name/type/day offset/window/price; Add visit, Delete with undo, Save / Cancel for the whole batch). Single-arm only in v1.
+- **Re-parse from PDF** — uploads a new protocol, runs the Claude SoA parser, reuses the `SoaReviewTable` for confirmation. Apply uses `replace_existing=true`, which **takes a snapshot first** then deletes prior visits before writing the new ones.
+- **Take snapshot** — manual `"manual"` snapshot creation with optional label.
+- **SoA version history** panel — every snapshot listed (created at, reason, label, visit count) with a **Restore** button that takes a `pre_restore` snapshot first so a bad restore is itself reversible.
+
+**Locked decisions:**
+1. **Replace existing visits on re-parse**, but **always snapshot first**. The "ask every time" alternative was rejected — the snapshot guarantees recovery, so the extra modal click was friction with no safety win.
+2. **Allow edits on active trials** with a visible warning banner. Matches PRD §5.2 live-resolution model.
+3. **Snapshot reasons are explicit enum-style strings**: `"reparse_replace"` (auto), `"manual"` (user-initiated), `"pre_restore"` (auto-before-restore). Lets the history panel render distinct labels.
+4. **Snapshots are JSONB on `soa_snapshots`**, not a separate visits-versioned table. Snapshots are append-only, immutable, and naturally fit a document-style payload. Migration 0007.
+
+**Backend:**
+- Migration `0007_soa_snapshots.py` — RLS-isolated.
+- `models/soa_snapshot.py` — `SoaSnapshot(trial_id, reason, label, visits JSONB, created_at, created_by_user_id)`.
+- `services/soa_snapshot.py` — `take_snapshot()` (captures every Visit across every Arm of the trial) and `restore_snapshot()` (takes a pre_restore snapshot, deletes current visits, writes the snapshot's visits back, mapping by arm name so arm-rename doesn't break restore).
+- `routers/soa_snapshots.py` — `GET /trials/{id}/soa-snapshots`, `POST /trials/{id}/soa-snapshots` (manual), `POST /soa-snapshots/{id}/restore`.
+- `routers/documents.py` — apply-parse-job endpoint accepts `replace_existing: bool` (default False to keep the wizard's "new trial" flow unchanged). When True, snapshot is taken before existing visits are deleted.
+
+**Frontend:**
+- `pages/Studies.tsx` — new dashboard route.
+- `pages/TrialDetail.tsx` — substantial rewrite to host edit modes (`EditTrialModal`, `EditableSoaTable`, `ReparsePanel`, `ManualSnapshotButton`, `SnapshotHistoryPanel`). Role-gated to `org_admin` / `ops_lead`.
+- `components/AppShell.tsx` — Studies link between Network and Metrics.
+- `App.tsx` — `/studies` route.
+- `api.ts` — `listSoaSnapshots`, `createSoaSnapshot`, `restoreSoaSnapshot`; `applyParseJob` adds `replace_existing?` param.
+
+**Tests:** backend 66 pass (+3 snapshot tests — manual creation captures current SoA, restore replaces + takes pre_restore snapshot, snapshots are org-scoped via RLS). Engine 30. Frontend 53 (no new tests for the rewrite — covered by existing TrialDetail render + the load-bearing snapshot path is backend-tested).

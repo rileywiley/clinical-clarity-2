@@ -13,6 +13,7 @@ import Metrics from "./pages/Metrics";
 import AdminSettings from "./pages/AdminSettings";
 import Onboarding from "./pages/Onboarding";
 import Import from "./pages/Import";
+import Studies from "./pages/Studies";
 
 export default function App() {
   const meQuery = useQuery({
@@ -44,6 +45,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/" element={<NetworkGrid />} />
+        <Route path="/studies" element={<Studies />} />
         <Route path="/projections" element={<ProjectionGrid />} />
         <Route path="/metrics" element={<Metrics />} />
         <Route path="/sites/:siteId" element={<SiteChart />} />

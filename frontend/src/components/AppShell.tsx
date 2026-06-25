@@ -20,6 +20,13 @@ export default function AppShell({ me, children }: { me: Me; children: React.Rea
             </Link>
             <nav className="flex items-center gap-3 text-slate-500 no-print">
               <Link to="/" className="hover:underline">Network</Link>
+              <Link
+                to="/studies"
+                className="hover:underline"
+                data-testid="nav-studies"
+              >
+                Studies
+              </Link>
               <Link to="/metrics" className="hover:underline">Metrics</Link>
               {me.role === "org_admin" && (
                 <>

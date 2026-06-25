@@ -2,7 +2,7 @@
 
 Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a module isn't on the diagram, it isn't done. The goal is to make orphaned or isolated modules obvious at a glance.
 
-**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ · Phase 6 ✅ · post-P6: bulk CSV import live)
+**Last refreshed:** 2026-06-24 (Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3 ✅ · Phase 4 ✅ · Phase 5 ✅ · Phase 6 ✅ · post-P6: bulk CSV import + Studies dashboard + SoA snapshots)
 
 ## Top-level system
 
@@ -10,7 +10,7 @@ Per CLAUDE.md golden rule #4, this diagram is **updated every phase**. If a modu
 flowchart LR
   subgraph Client["frontend (React+TS+Vite+Tailwind)"]
     APP[App.tsx]
-    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, TrialDetail, Metrics,<br/>TrialWizard (Phase 5)<br/>AdminSettings + Onboarding (Phase 6)<br/>Import (post-P6 bulk CSV)"]
+    PAGES["pages: Login, NetworkGrid, ProjectionGrid,<br/>SiteChart, SiteCalendar, Metrics,<br/>TrialWizard (Phase 5)<br/>AdminSettings + Onboarding (Phase 6)<br/>Import (post-P6 bulk CSV)<br/>Studies + TrialDetail edit modes (post-P6)"]
     SOA["components/SoaReviewTable (Phase 5)<br/>confidence bands + blocking"]
     SHELL["components/AppShell<br/>(top bar + nav, admin link role-gated)"]
     API_CLIENT[api.ts]
@@ -56,6 +56,7 @@ flowchart LR
       R_USERS["routers.users (Phase 6)<br/>(admin CRUD + site assignments;<br/>guards last-active-admin)"]
       R_EXP["routers.exports (Phase 6)<br/>(network.csv, sites/:id/forecast.csv)"]
       R_IMP["routers.imports (post-P6)<br/>(templates/preview/commit;<br/>sites · trials · projections)"]
+      R_SNAP["routers.soa_snapshots (post-P6)<br/>(list/manual/restore)"]
     end
 
     subgraph Core
@@ -82,6 +83,7 @@ flowchart LR
       M_DOC["Document (Phase 5)"]
       M_SPJ["SoaParseJob (Phase 5)<br/>parsed_visits JSONB"]
       M_USA["UserSiteAssignment (Phase 6)<br/>m:m users↔sites"]
+      M_SNAP["SoaSnapshot (post-P6)<br/>JSONB visit dump per trial"]
       M_ORG --> M_BASE
       M_USER --> M_BASE
       M_ORGSET --> M_BASE
@@ -95,6 +97,7 @@ flowchart LR
       M_EW --> M_BASE
       M_EWH --> M_BASE
       M_USA --> M_BASE
+      M_SNAP --> M_BASE
     end
 
     subgraph Services
@@ -108,6 +111,7 @@ flowchart LR
       SVC_STORAGE["storage<br/>(S3/MinIO via aiobotocore)"]
       SVC_CSV["csv_export (Phase 6)<br/>cells_to_csv (deterministic sort)"]
       SVC_CSVI["csv_import (post-P6)<br/>per-kind validate + write<br/>(all-or-nothing transaction)"]
+      SVC_SNAP["soa_snapshot (post-P6)<br/>take_snapshot / restore_snapshot"]
     end
 
     MAIN --> Routers
@@ -168,6 +172,11 @@ flowchart LR
     SVC_CSVI --> M_STRIAL
     SVC_CSVI --> M_EW
     SVC_CSVI --> M_CURVE
+    R_SNAP --> SVC_SNAP
+    SVC_SNAP --> M_SNAP
+    SVC_SNAP --> M_VISIT
+    SVC_SNAP --> M_ARM
+    R_DOC -- "replace_existing=true →<br/>take_snapshot before delete" --> SVC_SNAP
   end
 
   subgraph Data
@@ -231,4 +240,6 @@ flowchart LR
 - **`UserSiteAssignment`** (Phase 6) is the m:m table behind site-scoped roles. Org-scoped via `OrgScopedMixin` like every other domain table; RLS policy follows the standard pattern.
 - **Render blueprint** (`render.yaml`) is checked in but **not applied**. The deploy is intentionally deferred — first-time deploy follows `docs/deploy.md`.
 - **Bulk CSV import** (`routers/imports.py` + `services/csv_import.py`, post-P6) is the org_admin shortcut to load many sites / trials / projections at once. Preview is a server-side dry-run; commit re-validates and writes in **one DB transaction** (all-or-nothing — `csv_import.commit_*` returns the same shape as preview, the router converts errors into a 422 with `{detail: {errors: [...]}}`). FK resolution by **name within org** is what makes a hand-edited spreadsheet usable; unknown names → preview error rather than a silent skip. Trial imports always land in `draft` status — activation stays with the wizard's validator (PRD §6.2).
+- **SoA snapshots** (`models/soa_snapshot.py` + `services/soa_snapshot.py` + `routers/soa_snapshots.py`, post-P6) are JSONB dumps of every Visit row across every Arm of a trial at a moment in time. Created automatically before a re-parse-replace (so a bad LLM redo is reversible) and manually from the TrialDetail edit screen. Restore writes the snapshot's visits back to the arm by **matching arm name** (so an arm-rename doesn't break the restore), after first taking a `pre_restore` snapshot — restores are themselves reversible.
+- **Studies dashboard** (`pages/Studies.tsx`, post-P6) sits at `/studies` and is the entry point to per-trial editing. Linked from the Studies nav item between Network and Metrics. The dashboard groups trials by status (Active / Draft / Archived) and links each into the existing `TrialDetail` page, which gained edit affordances (metadata modal, inline SoA editing, re-parse from PDF, snapshot history) gated to `org_admin` / `ops_lead`. The active-trial warning banner is *informational, not blocking* — the live-resolution model (PRD §5.2) makes everyday edits on active trials the expected case.
 - Frontend dev hits the backend via Vite's `/api` proxy, keeping both on the same origin in dev so the session cookie round-trips without CORS gymnastics.

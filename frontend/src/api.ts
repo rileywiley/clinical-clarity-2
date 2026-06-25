@@ -229,7 +229,7 @@ export const api = {
       Array<
         SiteTrialOut & {
           trial_name: string;
-          trial_status: "draft" | "active" | "closed";
+          trial_status: "draft" | "active" | "archived";
         }
       >
     >(`/sites/${siteId}/trials`),
@@ -390,7 +390,11 @@ export const api = {
     request<SoaParseJobDetailOut>(`/parse-jobs/${jobId}/parsed-visits`),
   applyParseJob: (
     jobId: string,
-    payload: { arm_id: string; visits: ParsedVisitOut[] },
+    payload: {
+      arm_id: string;
+      visits: ParsedVisitOut[];
+      replace_existing?: boolean;
+    },
   ) =>
     request<
       Array<{
@@ -453,6 +457,28 @@ export const api = {
     }),
   unassignUserFromSite: (siteId: string, userId: string) =>
     request<void>(`/sites/${siteId}/users/${userId}`, { method: "DELETE" }),
+
+  // Post-Phase-6 — SoA snapshots (revert a bad re-parse, take manual ones)
+  listSoaSnapshots: (trialId: string) =>
+    request<
+      Array<{
+        id: string;
+        trial_id: string;
+        reason: "reparse_replace" | "manual" | "pre_restore";
+        label: string | null;
+        created_at: string;
+        visit_count: number;
+      }>
+    >(`/trials/${trialId}/soa-snapshots`),
+  createSoaSnapshot: (trialId: string, label?: string) =>
+    request<{ id: string; reason: string; label: string | null }>(
+      `/trials/${trialId}/soa-snapshots`,
+      { method: "POST", body: JSON.stringify({ label: label ?? null }) },
+    ),
+  restoreSoaSnapshot: (snapshotId: string) =>
+    request<{ id: string }>(`/soa-snapshots/${snapshotId}/restore`, {
+      method: "POST",
+    }),
 
   // Post-Phase-6 — bulk CSV import (sites / trials / projections).
   // XLSX is the default download (it carries the Reference sheet listing

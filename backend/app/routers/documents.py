@@ -268,6 +268,27 @@ async def apply_parse_job(
             detail="arm does not belong to this parse job's trial",
         )
 
+    # Re-parse from TrialDetail sets replace_existing=True: snapshot the
+    # current SoA so the user can revert if the new parse is worse than
+    # the one it replaced, then delete the old visits before writing.
+    if payload.replace_existing:
+        from app.services.soa_snapshot import take_snapshot
+
+        await take_snapshot(
+            db,
+            org_id=user.org_id,
+            trial_id=arm.trial_id,
+            reason="reparse_replace",
+            label=f"auto-snapshot before re-parse (parse job {job.id})",
+            created_by_user_id=user.id,
+        )
+        existing = (
+            await db.execute(select(Visit).where(Visit.arm_id == arm.id))
+        ).scalars().all()
+        for v in existing:
+            await db.delete(v)
+        await db.flush()
+
     created: list[Visit] = []
     for i, spec in enumerate(payload.visits):
         v = Visit(
