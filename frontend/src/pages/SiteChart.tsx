@@ -23,6 +23,8 @@ import {
 } from "recharts";
 import { api } from "../api";
 import { KpiStrip } from "../components/KpiStrip";
+import { MetricToggle } from "../components/MetricToggle";
+import { useChartMetric } from "../lib/chartMetric";
 import { TrialColorBadge } from "../components/TrialColorBadge";
 import { trialColor } from "../lib/trialColors";
 import { fmtMonDay, fmtPct, fmtUsd } from "../lib/formatters";
@@ -51,6 +53,7 @@ export default function SiteChart() {
     const saved = localStorage.getItem("siteChart.stackBy");
     return saved === "visit_type" ? "visit_type" : "trial";
   });
+  const [metric, setMetric] = useChartMetric();
 
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const cellsQ = useQuery({
@@ -79,9 +82,9 @@ export default function SiteChart() {
     return m;
   }, [trialsQ.data]);
 
-  // Build the chart series. Convert visit counts to demand hours using each
-  // cell's per-type weight. The engine already returned demand_hours so we
-  // proportionally allocate across types/trials.
+  // Build the chart series. In "hours" mode we proportionally allocate the
+  // cell's demand_hours across types/trials by visit weight; in "visits" mode
+  // the raw counts are the series values directly (scale = 1).
   const chartData = useMemo(() => {
     return cells.map((c) => {
       const totalVisits = Object.values(c.visits_by_type).reduce(
@@ -95,7 +98,7 @@ export default function SiteChart() {
         demand: c.demand_hours,
       };
       if (totalVisits === 0) return row;
-      const scale = c.demand_hours / totalVisits;
+      const scale = metric === "hours" ? c.demand_hours / totalVisits : 1;
       if (stackBy === "trial") {
         for (const [trialId, count] of Object.entries(c.visits_by_trial)) {
           row[`trial:${trialId}`] = count * scale;
@@ -107,7 +110,7 @@ export default function SiteChart() {
       }
       return row;
     });
-  }, [cells, stackBy]);
+  }, [cells, stackBy, metric]);
 
   // Series keys for the stacked area.
   const seriesKeys = useMemo(() => {
@@ -272,6 +275,7 @@ export default function SiteChart() {
       </section>
 
       <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
         <div
           className="inline-flex rounded border border-slate-300"
           role="tablist"
@@ -304,6 +308,8 @@ export default function SiteChart() {
             Stack by visit type
           </button>
         </div>
+        <MetricToggle value={metric} onChange={setMetric} />
+        </div>
         {stackBy === "trial" && trialsQ.data && (
           <div className="flex flex-wrap items-center gap-3">
             {trialsQ.data.map((t) => (
@@ -324,9 +330,17 @@ export default function SiteChart() {
           <ComposedChart data={chartData} margin={{ top: 8, right: 24, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="#f1f5f9" />
             <XAxis dataKey="label" />
-            <YAxis label={{ value: "room-hours / week", angle: -90, position: "insideLeft" }} />
+            <YAxis
+              label={{
+                value: metric === "hours" ? "room-hours / week" : "visits / week",
+                angle: -90,
+                position: "insideLeft",
+              }}
+            />
             <Tooltip
-              formatter={(v: number) => `${v.toFixed(1)} hr`}
+              formatter={(v: number) =>
+                metric === "hours" ? `${v.toFixed(1)} hr` : `${v.toFixed(1)} visits`
+              }
               labelFormatter={(label, payload) => {
                 const wk = payload?.[0]?.payload?.week_start;
                 return wk ? `Week of ${wk}` : label;
@@ -355,14 +369,16 @@ export default function SiteChart() {
                 />
               );
             })}
-            <Line
-              type="monotone"
-              dataKey="capacity"
-              stroke="#334155"
-              strokeWidth={2}
-              dot={false}
-              name="Capacity"
-            />
+            {metric === "hours" && (
+              <Line
+                type="monotone"
+                dataKey="capacity"
+                stroke="#334155"
+                strokeWidth={2}
+                dot={false}
+                name="Capacity"
+              />
+            )}
             {chartData[0] && (
               <ReferenceLine
                 x={chartData[0].label as string}

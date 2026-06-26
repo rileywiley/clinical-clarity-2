@@ -36,6 +36,8 @@ import {
   type SoaParseJobOut,
 } from "../api";
 import { KpiStrip } from "../components/KpiStrip";
+import { MetricToggle } from "../components/MetricToggle";
+import { useChartMetric } from "../lib/chartMetric";
 import { SoaReviewTable } from "../components/SoaReviewTable";
 import { TrialStatusActions } from "../components/TrialStatusActions";
 import { trialColor } from "../lib/trialColors";
@@ -122,12 +124,14 @@ export default function TrialDetail() {
   }
 
   const cells = cellsQ.data ?? [];
+  const [metric, setMetric] = useChartMetric();
   const chartData = useMemo(
     () =>
       cells.map((c) => ({
         week_start: c.week_start,
         label: fmtMonDay(c.week_start),
         hours: c.demand_hours,
+        visits: Object.values(c.visits_by_type).reduce((a, b) => a + b, 0),
       })),
     [cells],
   );
@@ -248,18 +252,26 @@ export default function TrialDetail() {
       )}
 
       <section className="mb-6 rounded border border-slate-200 bg-white p-3">
-        <h2 className="mb-2 text-sm font-medium text-slate-700">
-          Trial forecast contribution — demand hours / week
-        </h2>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-slate-700">
+            Trial forecast contribution —{" "}
+            {metric === "hours" ? "demand hours" : "visits"} / week
+          </h2>
+          <MetricToggle value={metric} onChange={setMetric} />
+        </div>
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData} margin={{ top: 8, right: 24, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="#f1f5f9" />
             <XAxis dataKey="label" />
             <YAxis />
-            <Tooltip formatter={(v: number) => `${v.toFixed(1)} hr`} />
+            <Tooltip
+              formatter={(v: number) =>
+                metric === "hours" ? `${v.toFixed(1)} hr` : `${v.toFixed(1)} visits`
+              }
+            />
             <Area
               type="monotone"
-              dataKey="hours"
+              dataKey={metric}
               stroke={trialColor(trial.id)}
               fill={trialColor(trial.id)}
               fillOpacity={0.6}
