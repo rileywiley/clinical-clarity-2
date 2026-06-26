@@ -74,14 +74,15 @@ def test_parse_sync_passes_system_with_cache_control() -> None:
     assert system[0]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_parse_sync_uses_opus_4_7_with_adaptive_thinking() -> None:
+def test_parse_sync_uses_configured_model_with_adaptive_thinking() -> None:
     fixture = json.loads(FIXTURE_PATH.read_text())
     client = _mock_anthropic_client(fixture)
 
     claude_soa.parse_sync(b"fake-pdf-bytes", client=client)
 
     kwargs = client.messages.parse.call_args.kwargs
-    assert kwargs["model"] == "claude-opus-4-7"
+    # The model is read from settings (default Sonnet 4.6), not hardcoded.
+    assert kwargs["model"] == claude_soa.model_id() == "claude-sonnet-4-6"
     assert kwargs["thinking"] == {"type": "adaptive"}
     # PRD §10.2 mitigation hinges on Pydantic-validated output.
     assert kwargs["output_format"] is ParsedSoa
@@ -111,4 +112,4 @@ def test_prompt_version_is_set() -> None:
     """A stored job's prompt_version must be non-empty so replay against a
     later prompt revision is possible."""
     assert claude_soa.PROMPT_VERSION
-    assert claude_soa.MODEL_ID == "claude-opus-4-7"
+    assert claude_soa.model_id() == "claude-sonnet-4-6"

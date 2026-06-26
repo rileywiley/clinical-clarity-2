@@ -61,7 +61,12 @@ class Settings(BaseSettings):
         default=None,
         description="Live API key for Claude SoA parsing. Tests inject a mock client; only the manual smoke needs a real key.",
     )
-    anthropic_model_id: str = Field(default="claude-opus-4-7")
+    # Model used by the SoA parser (services/claude_soa.py). Sonnet 4.6 is the
+    # default: strong vision + structured outputs at ~40% of Opus's cost, with a
+    # human-review backstop on every parse (PRD §10.2). Override via the
+    # ANTHROPIC_MODEL_ID env var to A/B against Opus (e.g. claude-opus-4-8) — no
+    # code change needed.
+    anthropic_model_id: str = Field(default="claude-sonnet-4-6")
 
     # --- Background worker (Phase 5) -----------------------------------
     redis_url: str = Field(default="redis://localhost:6379")

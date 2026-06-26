@@ -56,7 +56,7 @@ async def parse_soa(ctx: dict, document_id: str, org_id: str, parse_job_id: str)
                 raise RuntimeError(f"parse job {job_id} not found for org {o_id}")
             job.status = SoaParseJobStatus.RUNNING
             job.started_at = _utcnow()
-            job.model_id = claude_soa.MODEL_ID
+            job.model_id = claude_soa.model_id()
             job.prompt_version = claude_soa.PROMPT_VERSION
 
             doc = await session.get(Document, doc_id)

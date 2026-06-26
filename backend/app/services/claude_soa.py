@@ -20,8 +20,18 @@ from typing import Literal
 from anthropic import Anthropic, AsyncAnthropic
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
+
 PROMPT_VERSION = "soa-parser-v1-2026-06-24"
-MODEL_ID = "claude-opus-4-7"
+
+
+def model_id() -> str:
+    """The Claude model the parser runs on, read live from settings
+    (``ANTHROPIC_MODEL_ID``; default ``claude-sonnet-4-6``). Reading it here —
+    rather than baking a constant — lets the model be switched via env without
+    a code change or redeploy. The worker stamps this onto SoaParseJob.model_id
+    so each saved job records exactly which model produced it."""
+    return get_settings().anthropic_model_id
 
 # Keep the prompt frozen — any byte change invalidates the cache. Per the
 # claude-api skill: render order is tools → system → messages, and the cache
@@ -130,7 +140,7 @@ async def parse_async(
     # prompt block carries the cache marker; user content (the PDF) goes in
     # `messages` and is not cached (varies per call).
     response = await client.messages.parse(
-        model=MODEL_ID,
+        model=model_id(),
         max_tokens=8192,
         thinking={"type": "adaptive"},
         system=[
@@ -158,7 +168,7 @@ def parse_sync(
 ) -> tuple[ParsedSoa, dict]:
     """Sync variant — used by tests that don't want an event loop."""
     response = client.messages.parse(
-        model=MODEL_ID,
+        model=model_id(),
         max_tokens=8192,
         thinking={"type": "adaptive"},
         system=[
