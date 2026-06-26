@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { api, type TrialOut, type TrialStatus } from "../api";
 import { TrialColorBadge } from "../components/TrialColorBadge";
 import { TrialStatusActions } from "../components/TrialStatusActions";
+import { ReadinessIcons } from "../components/ReadinessIcons";
 import { EmptyState } from "../components/EmptyState";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { fmtCount } from "../lib/formatters";
@@ -31,8 +32,19 @@ export default function Studies() {
 
   const trialsQ = useQuery({ queryKey: ["trials"], queryFn: api.listTrials });
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  // Activation readiness for draft/planned trials — what's still missing.
+  const readinessQ = useQuery({
+    queryKey: ["trials-readiness"],
+    queryFn: api.listTrialReadiness,
+  });
 
   const trials = trialsQ.data ?? [];
+
+  const readinessByTrial = useMemo(
+    () =>
+      new Map((readinessQ.data ?? []).map((r) => [r.trial_id, r.failures])),
+    [readinessQ.data],
+  );
 
   // For per-trial site counts we'd need a fan-out call per trial; instead
   // use the inverse view if we can. The existing endpoint we have is
@@ -105,7 +117,10 @@ export default function Studies() {
                     <th className="px-3 py-2 text-right">Rand target</th>
                     <th className="px-3 py-2 text-right">Screen target</th>
                     {(s === "draft" || s === "planned") && (
-                      <th className="px-3 py-2 text-right">Actions</th>
+                      <>
+                        <th className="px-3 py-2 text-right">Readiness</th>
+                        <th className="px-3 py-2 text-right">Actions</th>
+                      </>
                     )}
                   </tr>
                 </thead>
@@ -131,13 +146,24 @@ export default function Studies() {
                         {fmtCount(t.screening_target)}
                       </td>
                       {(s === "draft" || s === "planned") && (
-                        <td className="px-3 py-1.5 text-right">
-                          <TrialStatusActions
-                            trialId={t.id}
-                            status={t.status}
-                            variant="inline"
-                          />
-                        </td>
+                        <>
+                          <td className="px-3 py-1.5 text-right">
+                            {readinessQ.isLoading ? (
+                              <span className="text-slate-400">…</span>
+                            ) : (
+                              <ReadinessIcons
+                                failures={readinessByTrial.get(t.id) ?? []}
+                              />
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <TrialStatusActions
+                              trialId={t.id}
+                              status={t.status}
+                              variant="inline"
+                            />
+                          </td>
+                        </>
                       )}
                     </tr>
                   ))}

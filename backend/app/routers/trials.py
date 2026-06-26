@@ -22,6 +22,7 @@ from app.schemas.trial import (
     TrialIn,
     TrialOut,
     TrialPatch,
+    TrialReadinessOut,
 )
 from app.services.trial_activation import validate_can_activate
 
@@ -44,6 +45,42 @@ async def list_trials(
         )
     ).scalars().all()
     return list(rows)
+
+
+# Registered before "/{trial_id}" so the literal path isn't parsed as a UUID
+# (same gotcha as /active-trials).
+@router.get("/readiness", response_model=list[TrialReadinessOut])
+async def trials_readiness(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrialReadinessOut]:
+    """Activation readiness for every draft/planned trial in the org — what's
+    still missing to activate. Reuses the canonical ``validate_can_activate`` so
+    the Studies dashboard icons never drift from the real gate. Active/archived
+    trials are omitted (nothing to ready)."""
+    trials = (
+        await db.execute(
+            select(Trial).where(
+                Trial.org_id == user.org_id,
+                Trial.status.in_((TrialStatus.DRAFT, TrialStatus.PLANNED)),
+            )
+        )
+    ).scalars().all()
+
+    out: list[TrialReadinessOut] = []
+    for t in trials:
+        failures = await validate_can_activate(db, t)
+        out.append(
+            TrialReadinessOut(
+                trial_id=t.id,
+                ready=not failures,
+                failures=[
+                    TrialActivationFailureOut(reason=f.reason, detail=f.detail)
+                    for f in failures
+                ],
+            )
+        )
+    return out
 
 
 @router.post(

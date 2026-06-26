@@ -50,6 +50,7 @@ export function TrialStatusActions({
     setFailures(null);
     for (const key of [
       ["trials"],
+      ["trials-readiness"],
       ["forecast-network"],
       ["trials-active"],
       ["trials-scoped"],

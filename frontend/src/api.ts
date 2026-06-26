@@ -58,6 +58,15 @@ export type TrialStatus = "draft" | "planned" | "active" | "archived";
 // Which trial statuses a forecast/report includes (PRD §6.9).
 export type ForecastScope = "active" | "planned" | "combined";
 
+// Per-trial activation readiness (GET /trials/readiness) — what's still missing
+// to activate. `reason` matches the activation gate (no_arms / no_visits /
+// no_randomization_visit / no_sites / no_attrition_curve).
+export type TrialReadinessOut = {
+  trial_id: string;
+  ready: boolean;
+  failures: { reason: string; detail: string }[];
+};
+
 export type TrialOut = {
   id: string;
   name: string;
@@ -227,7 +236,25 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   listSites: () => request<SiteOut[]>("/sites"),
+  patchSite: (
+    siteId: string,
+    payload: Partial<{
+      name: string;
+      address: string | null;
+      timezone: string;
+      operating_weekdays: number[];
+      hours_per_day: number;
+      rooms: number;
+      active: boolean;
+    }>,
+  ) =>
+    request<SiteOut>(`/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   listTrials: () => request<TrialOut[]>("/trials"),
+  listTrialReadiness: () =>
+    request<TrialReadinessOut[]>("/trials/readiness"),
   listArms: (trialId: string) => request<ArmOut[]>(`/trials/${trialId}/arms`),
   listAssignments: (trialId: string) =>
     request<SiteTrialOut[]>(`/trials/${trialId}/sites`),

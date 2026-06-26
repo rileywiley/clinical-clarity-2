@@ -67,3 +67,12 @@ class TrialActivationErrorOut(BaseModel):
     """Surface every prerequisite failure at once (better wizard UX)."""
 
     failures: list[TrialActivationFailureOut]
+
+
+class TrialReadinessOut(BaseModel):
+    """Per-trial activation readiness — the same checks as activation, exposed
+    read-only so the Studies dashboard can show what's still missing."""
+
+    trial_id: UUID
+    ready: bool
+    failures: list[TrialActivationFailureOut]

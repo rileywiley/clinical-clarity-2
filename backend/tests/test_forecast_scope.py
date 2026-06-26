@@ -215,3 +215,44 @@ async def test_delete_blocked_while_planned(client: AsyncClient) -> None:
     res = await client.request("DELETE", f"/trials/{ids['trial_id']}")
     assert res.status_code == 409, res.text
     assert "planned" in res.json()["detail"]
+
+
+async def test_trials_readiness_reports_missing_requirements(
+    client: AsyncClient,
+) -> None:
+    """GET /trials/readiness reuses the activation gate: a fully-configured
+    draft is ready; a bare draft lists what's missing."""
+    ids = await _seed_full_trial(client, "ReadyOrg")  # complete draft
+
+    # A bare trial: attrition curve only, no SoA / no site.
+    curve = (
+        await client.post(
+            "/attrition-curves", json={"name": "Zero", "total_dropout_pct": 0.0}
+        )
+    ).json()
+    bare = (
+        await client.post(
+            "/trials",
+            json={
+                "name": "Bare",
+                "fpfv": "2025-01-06",
+                "lpfv": "2028-01-03",
+                "lplv": "2029-01-01",
+                "enrollment_target": 100,
+                "screening_target": 125,
+                "attrition_curve_id": curve["id"],
+            },
+        )
+    ).json()
+
+    by_trial = {
+        e["trial_id"]: e for e in (await client.get("/trials/readiness")).json()
+    }
+    assert by_trial[ids["trial_id"]]["ready"] is True
+    assert by_trial[ids["trial_id"]]["failures"] == []
+
+    bare_entry = by_trial[bare["id"]]
+    assert bare_entry["ready"] is False
+    reasons = {f["reason"] for f in bare_entry["failures"]}
+    assert "no_visits" in reasons
+    assert "no_sites" in reasons
