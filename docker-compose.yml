@@ -84,7 +84,10 @@ services:
       S3_BUCKET: vfp-documents
       S3_ACCESS_KEY_ID: vfp_dev_access
       S3_SECRET_ACCESS_KEY: vfp_dev_secret
-      # ANTHROPIC_API_KEY set out-of-band (.env or shell). Tests inject a mock.
+      # Interpolated from the repo-root .env (Compose reads it automatically).
+      # Empty string if unset, so the stack still boots without a key — only
+      # SoA parsing needs it. The worker service mirrors this.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -114,6 +117,10 @@ services:
       S3_BUCKET: vfp-documents
       S3_ACCESS_KEY_ID: vfp_dev_access
       S3_SECRET_ACCESS_KEY: vfp_dev_secret
+      # SoA parsing runs here (arq parse_soa job) — it's the service that
+      # actually calls the Claude API, so it must carry the key. Interpolated
+      # from the repo-root .env.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
