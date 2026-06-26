@@ -24,6 +24,14 @@ from app.config import get_settings
 
 PROMPT_VERSION = "soa-parser-v1-2026-06-24"
 
+# Output-token budget — a hard cap on what the model emits. Thinking is disabled
+# for parsing (see parse_async): real protocols run to ~250K input tokens, and
+# adaptive thinking reasons over the *whole* document, spending the entire budget
+# before emitting any JSON (stop_reason=max_tokens, no result — measured). With
+# thinking off the output is just the SoA JSON — a few hundred tokens for a
+# typical schedule — so 16K is ample headroom even for large multi-arm trials.
+MAX_OUTPUT_TOKENS = 16000
+
 
 def model_id() -> str:
     """The Claude model the parser runs on, read live from settings
@@ -141,8 +149,13 @@ async def parse_async(
     # `messages` and is not cached (varies per call).
     response = await client.messages.parse(
         model=model_id(),
-        max_tokens=8192,
-        thinking={"type": "adaptive"},
+        max_tokens=MAX_OUTPUT_TOKENS,
+        # Thinking OFF. With ~250K-token protocols, adaptive thinking reasons
+        # over the whole document and spends the entire output budget before
+        # emitting any JSON (stop_reason=max_tokens). Structured extraction with
+        # a human-review backstop (PRD §10.2) doesn't need it; the model still
+        # sees the full PDF via vision.
+        thinking={"type": "disabled"},
         system=[
             {
                 "type": "text",
@@ -169,8 +182,13 @@ def parse_sync(
     """Sync variant — used by tests that don't want an event loop."""
     response = client.messages.parse(
         model=model_id(),
-        max_tokens=8192,
-        thinking={"type": "adaptive"},
+        max_tokens=MAX_OUTPUT_TOKENS,
+        # Thinking OFF. With ~250K-token protocols, adaptive thinking reasons
+        # over the whole document and spends the entire output budget before
+        # emitting any JSON (stop_reason=max_tokens). Structured extraction with
+        # a human-review backstop (PRD §10.2) doesn't need it; the model still
+        # sees the full PDF via vision.
+        thinking={"type": "disabled"},
         system=[
             {
                 "type": "text",

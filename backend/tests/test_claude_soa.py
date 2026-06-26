@@ -74,7 +74,7 @@ def test_parse_sync_passes_system_with_cache_control() -> None:
     assert system[0]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_parse_sync_uses_configured_model_with_adaptive_thinking() -> None:
+def test_parse_sync_uses_configured_model_with_thinking_disabled() -> None:
     fixture = json.loads(FIXTURE_PATH.read_text())
     client = _mock_anthropic_client(fixture)
 
@@ -83,7 +83,10 @@ def test_parse_sync_uses_configured_model_with_adaptive_thinking() -> None:
     kwargs = client.messages.parse.call_args.kwargs
     # The model is read from settings (default Sonnet 4.6), not hardcoded.
     assert kwargs["model"] == claude_soa.model_id() == "claude-sonnet-4-6"
-    assert kwargs["thinking"] == {"type": "adaptive"}
+    # Thinking is disabled — adaptive thinking over ~250K-token protocols burns
+    # the whole output budget before any JSON is emitted (measured).
+    assert kwargs["thinking"] == {"type": "disabled"}
+    assert kwargs["max_tokens"] == claude_soa.MAX_OUTPUT_TOKENS
     # PRD §10.2 mitigation hinges on Pydantic-validated output.
     assert kwargs["output_format"] is ParsedSoa
 
