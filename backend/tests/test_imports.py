@@ -402,10 +402,28 @@ async def test_xlsx_template_projections_is_per_site_grid(
     assert site_ws["A3"].value == "week_start"
     assert site_ws["B3"].value == "Screened"
     assert site_ws["C3"].value == "Randomized"
-    # 12 Monday rows, all Mondays, starting row 4.
-    week_cells = [site_ws.cell(row=r, column=1).value for r in range(4, 16)]
-    assert len(week_cells) == 12
+    # 52 Monday rows, all Mondays, starting row 4.
+    week_cells = [site_ws.cell(row=r, column=1).value for r in range(4, 56)]
+    assert len(week_cells) == 52
     assert all(date.fromisoformat(str(w)).weekday() == 0 for w in week_cells)
+
+    # The study's cells (Screened/Randomized) are highlighted for weeks inside
+    # its FPFV–LPFV window (seed: 2026-09-07 .. 2027-09-06); weeks before FPFV
+    # are not. Column A (week_start) is left plain.
+    fpfv = date(2026, 9, 7)
+    rows = {
+        r: date.fromisoformat(str(site_ws.cell(row=r, column=1).value))
+        for r in range(4, 56)
+    }
+    before = next(r for r, d in rows.items() if d < fpfv)
+    inside = next(r for r, d in rows.items() if d >= fpfv)
+    # PT's Screened (col B) + Randomized (col C) highlighted only inside the window.
+    assert site_ws.cell(row=before, column=2).fill.patternType is None
+    assert site_ws.cell(row=inside, column=2).fill.patternType == "solid"
+    assert site_ws.cell(row=inside, column=3).fill.patternType == "solid"
+    # week_start column is no longer emphasized.
+    assert site_ws.cell(row=inside, column=1).fill.patternType is None
+    assert not site_ws.cell(row=inside, column=1).font.bold
 
 
 async def test_xlsx_projections_grid_round_trips_to_enrollment_weeks(

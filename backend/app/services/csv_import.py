@@ -195,7 +195,7 @@ async def template_xlsx_for(
 # so the sheet reads like the Projections page. Re-importing upserts.
 
 _ILLEGAL_SHEET_CHARS = set(r"[]:*?/\\")
-_PROJECTION_TEMPLATE_WEEKS = 12
+_PROJECTION_TEMPLATE_WEEKS = 52
 
 
 def _safe_sheet_title(name: str, used: set[str]) -> str:
@@ -212,8 +212,8 @@ def _safe_sheet_title(name: str, used: set[str]) -> str:
     return title
 
 
-def _twelve_week_mondays(today: date | None = None) -> list[date]:
-    """Current site-local-ish Monday + 11 future Mondays (the app's forward view)."""
+def _template_mondays(today: date | None = None) -> list[date]:
+    """Current Monday + the next 51 (a full year of forward weeks)."""
     base = today or date.today()
     monday = base - timedelta(days=base.weekday())
     return [monday + timedelta(weeks=i) for i in range(_PROJECTION_TEMPLATE_WEEKS)]
@@ -248,7 +248,8 @@ async def _studies_by_site(
 async def _projections_grid_template(org_id: UUID, db: AsyncSession) -> bytes:
     from openpyxl.styles import Font, PatternFill
 
-    fill = PatternFill("solid", fgColor="E2E8F0")
+    fill = PatternFill("solid", fgColor="E2E8F0")  # slate-200 header fill
+    window_fill = PatternFill("solid", fgColor="FEF3C7")  # amber-100 — in-window cells
     bold = Font(bold=True)
 
     wb = Workbook()
@@ -261,7 +262,8 @@ async def _projections_grid_template(org_id: UUID, db: AsyncSession) -> bytes:
         ["• Each site has its own tab. Don't rename tabs or move the three header rows."],
         ["• Row 1 = study, Row 2 = arm, Row 3 = column labels."],
         ["• Enter weekly projected counts under each study's Screened / Randomized columns."],
-        ["• week_start dates are Mondays. Leave a cell blank for 'no projection' that week."],
+        ["• week_start dates are Mondays (52 forward weeks). Leave a cell blank for 'no projection' that week."],
+        ["• Highlighted cells fall inside a study's enrollment window (FPFV–LPFV) — that's where projections belong."],
         ["• Re-importing overwrites the same (site, study, arm, week). Sites/studies you"],
         ["  don't touch are untouched."],
     ):
@@ -272,7 +274,7 @@ async def _projections_grid_template(org_id: UUID, db: AsyncSession) -> bytes:
         await db.execute(select(Site).where(Site.org_id == org_id).order_by(Site.name))
     ).scalars().all()
     groups_by_site = await _studies_by_site(org_id, db)
-    mondays = _twelve_week_mondays()
+    mondays = _template_mondays()
     used_titles = {"instructions"}
 
     if not sites:
@@ -308,6 +310,19 @@ async def _projections_grid_template(org_id: UUID, db: AsyncSession) -> bytes:
             for cell in ws[r]:
                 cell.font = bold
                 cell.fill = fill
+
+        # Highlight the cells under each study for the weeks inside that study's
+        # enrollment window (FPFV–LPFV) — that's where projections belong. The
+        # fill lands on the study's own Screened/Randomized input cells, so the
+        # emphasis sits exactly where the user types.
+        for ri, m in enumerate(mondays):
+            r = 4 + ri
+            for gi, (trial, _arm) in enumerate(groups):
+                if trial.fpfv <= m <= trial.lpfv:
+                    sc = 2 + 2 * gi
+                    ws.cell(row=r, column=sc).fill = window_fill
+                    ws.cell(row=r, column=sc + 1).fill = window_fill
+
         ws.freeze_panes = "B4"  # keep week_start col + header rows visible
         _autosize(ws)
 
