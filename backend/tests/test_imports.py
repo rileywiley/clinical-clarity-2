@@ -383,21 +383,77 @@ async def test_xlsx_template_trials_includes_site_reference_sheet(
     assert "Custom" in curve_col
 
 
-async def test_xlsx_template_projections_includes_trial_reference(
+async def test_xlsx_template_projections_is_per_site_grid(
     client: AsyncClient, org: dict
 ) -> None:
-    """Projections Reference sheet lists existing trials so a user picks
-    the right trial_name (and arm_name on multi-arm trials)."""
+    """The projections template is one sheet per site, app-shaped: each
+    assigned study is a Screened/Randomized column group with weeks down the
+    rows (PRD §7.3)."""
     await _seed_trial_with_arm(client)
     res = await client.get("/imports/templates/projections.xlsx")
     assert res.status_code == 200
     wb = load_workbook(BytesIO(res.content))
-    ref = wb["Reference"]
-    rows = [list(r) for r in ref.iter_rows(values_only=True)]
-    flat = " | ".join(" | ".join(str(c or "") for c in r) for r in rows)
-    assert "PSite" in flat  # site name from seed
-    assert "PT" in flat  # trial name from seed
-    assert "Default Arm" in flat  # arm column
+
+    assert "Instructions" in wb.sheetnames
+    # The site gets its own tab; A1 carries the full site name.
+    site_ws = next(ws for ws in wb.worksheets if ws["A1"].value == "PSite")
+    assert site_ws["B1"].value == "PT"  # study (trial) group header
+    assert site_ws["B2"].value == "Default Arm"  # arm header
+    assert site_ws["A3"].value == "week_start"
+    assert site_ws["B3"].value == "Screened"
+    assert site_ws["C3"].value == "Randomized"
+    # 12 Monday rows, all Mondays, starting row 4.
+    week_cells = [site_ws.cell(row=r, column=1).value for r in range(4, 16)]
+    assert len(week_cells) == 12
+    assert all(date.fromisoformat(str(w)).weekday() == 0 for w in week_cells)
+
+
+async def test_xlsx_projections_grid_round_trips_to_enrollment_weeks(
+    client: AsyncClient, org: dict
+) -> None:
+    """Download the per-site grid, fill two weeks for the assigned study,
+    upload, and the projections land as EnrollmentWeek rows."""
+    site_id, trial_id, arm_id = await _seed_trial_with_arm(client)
+    res = await client.get("/imports/templates/projections.xlsx")
+    wb = load_workbook(BytesIO(res.content))
+    ws = next(w for w in wb.worksheets if w["A1"].value == "PSite")
+
+    # Fill the first two week rows: Screened=B, Randomized=C.
+    w0 = date.fromisoformat(str(ws["A4"].value))
+    w1 = date.fromisoformat(str(ws["A5"].value))
+    ws["B4"], ws["C4"] = 7, 5
+    ws["B5"], ws["C5"] = 8, 6
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    files = {
+        "file": (
+            "projections-filled.xlsx",
+            buf,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    }
+    cm = await client.post("/imports/projections/commit", files=files)
+    assert cm.status_code == 200, cm.text
+
+    # Read the enrollment weeks back for this (site_trial, arm).
+    st = (await client.get(f"/trials/{trial_id}/sites")).json()[0]
+    weeks = (
+        await client.get(
+            f"/site-trials/{st['id']}/enrollment-weeks",
+            params={
+                "arm_id": arm_id,
+                "from": w0.isoformat(),
+                "to": w1.isoformat(),
+            },
+        )
+    ).json()
+    by_week = {w["week_start"]: w for w in weeks}
+    assert by_week[w0.isoformat()]["proj_screened"] == 7
+    assert by_week[w0.isoformat()]["proj_randomized"] == 5
+    assert by_week[w1.isoformat()]["proj_screened"] == 8
+    assert by_week[w1.isoformat()]["proj_randomized"] == 6
 
 
 async def test_xlsx_upload_round_trips_through_validator(

@@ -6,8 +6,14 @@ row fails, the whole file is rejected and no writes happen (PRD §6.2
 modeling decisions stay intact).
 
 Foreign keys resolve by name within the org. Unknown names → preview
-error. Trials always import as ``draft`` (the wizard's activation
-validator still owns activation per PRD §6.2).
+error. Trials always import as ``draft``: bulk import seeds the trial,
+its site assignments, and an attrition curve, but never an SoA — and an
+SoA (with a randomization visit) is required to become ``planned`` or
+``active``. So the validated transition (`/trials/{id}/plan` or
+`/activate`, PRD §6.9 / §7.1) still owns the lifecycle; a draft can't be
+shortcut into the forecast by import. Projections, by contrast, can be
+imported against a trial in any status (planned trials carry their
+future-dated projections too — PRD §7.1).
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -104,9 +110,13 @@ def _set_header_style(ws) -> None:
 
 
 def _autosize(ws) -> None:
-    for col in ws.columns:
+    from openpyxl.utils import get_column_letter
+
+    # Index-based column letter: merged cells yield MergedCell objects with no
+    # `.column_letter`, so we can't read it off the first cell of each column.
+    for i, col in enumerate(ws.columns, start=1):
         max_len = max((len(str(c.value or "")) for c in col), default=0)
-        ws.column_dimensions[col[0].column_letter].width = min(max(12, max_len + 2), 40)
+        ws.column_dimensions[get_column_letter(i)].width = min(max(12, max_len + 2), 40)
 
 
 async def template_xlsx_for(
@@ -114,6 +124,12 @@ async def template_xlsx_for(
 ) -> bytes:
     """Build the kind's XLSX template, populating the Reference sheet with
     live names from the org. Returns the binary .xlsx bytes."""
+    # Projections get a richer, app-shaped workbook: one sheet per site, with
+    # each assigned study as a Screened/Randomized column group and weeks down
+    # the rows (mirrors the Projections page, PRD §7.3). Handled separately.
+    if kind == "projections":
+        return await _projections_grid_template(org_id, db)
+
     wb = Workbook()
     data_ws = wb.active
     assert data_ws is not None
@@ -151,37 +167,6 @@ async def template_xlsx_for(
             )
         if not sites and not curves:
             ref_ws.append(["(no sites yet — create one first)", ""])
-    elif kind == "projections":
-        # Trials + arms, so the user can pick the right arm name on
-        # multi-arm trials (rare in v1, but the column exists).
-        trials = (
-            await db.execute(
-                select(Trial.id, Trial.name, Trial.status)
-                .where(Trial.org_id == org_id)
-                .order_by(Trial.name)
-            )
-        ).all()
-        sites = (
-            await db.execute(
-                select(Site.name).where(Site.org_id == org_id).order_by(Site.name)
-            )
-        ).scalars().all()
-        arms_by_trial: dict[UUID, list[str]] = {}
-        for arm in (
-            await db.execute(select(Arm).where(Arm.org_id == org_id))
-        ).scalars().all():
-            arms_by_trial.setdefault(arm.trial_id, []).append(arm.name)
-
-        ref_ws.append(["Existing site names"])
-        for s in sites:
-            ref_ws.append([s])
-        ref_ws.append([])
-        ref_ws.append(["Existing trial names", "Status", "Arm name(s)"])
-        for tid, tname, tstatus in trials:
-            arms = ", ".join(sorted(arms_by_trial.get(tid, []))) or "Default Arm"
-            ref_ws.append([tname, tstatus.value if hasattr(tstatus, "value") else str(tstatus), arms])
-        if not trials:
-            ref_ws.append(["(no trials yet — create one first)", "", ""])
     else:
         # Sites template needs no reference data — nothing exists to
         # collide with. Show a small note instead so users aren't
@@ -199,22 +184,169 @@ async def template_xlsx_for(
 
 
 # ---------------------------------------------------------------------------
+# Projections grid template — one sheet per site, app-shaped (PRD §7.3).
+#
+# Layout per site sheet (a 3-row header so trial + arm survive round-trip):
+#   A1 = <site name>      B1:C1 = <trial>     D1:E1 = <trial> ...
+#   A2 = (blank)          B2:C2 = <arm>       D2:E2 = <arm>   ...
+#   A3 = "week_start"     B3 = "Screened" C3 = "Randomized"   ...
+#   A4.. = Monday dates; the Screened/Randomized cells are left blank to fill.
+# Each assigned study (one column group per trial×arm) is listed across the top
+# so the sheet reads like the Projections page. Re-importing upserts.
+
+_ILLEGAL_SHEET_CHARS = set(r"[]:*?/\\")
+_PROJECTION_TEMPLATE_WEEKS = 12
+
+
+def _safe_sheet_title(name: str, used: set[str]) -> str:
+    """Excel sheet titles are ≤31 chars, can't contain []:*?/\\, and must be
+    unique. The full site name still lives in cell A1, so a lossy title is fine."""
+    cleaned = "".join(c for c in name if c not in _ILLEGAL_SHEET_CHARS).strip() or "Site"
+    title = cleaned[:31]
+    i = 2
+    while title.lower() in used:
+        suffix = f" ({i})"
+        title = cleaned[: 31 - len(suffix)] + suffix
+        i += 1
+    used.add(title.lower())
+    return title
+
+
+def _twelve_week_mondays(today: date | None = None) -> list[date]:
+    """Current site-local-ish Monday + 11 future Mondays (the app's forward view)."""
+    base = today or date.today()
+    monday = base - timedelta(days=base.weekday())
+    return [monday + timedelta(weeks=i) for i in range(_PROJECTION_TEMPLATE_WEEKS)]
+
+
+async def _studies_by_site(
+    org_id: UUID, db: AsyncSession
+) -> dict[UUID, list[tuple[Trial, Arm]]]:
+    """For each site, the (trial, arm) column groups it should show — every
+    active assignment, each trial expanded to its arms. Ordered by trial then
+    arm name for a stable layout."""
+    assignments = (
+        await db.execute(
+            select(SiteTrial.site_id, Trial)
+            .join(Trial, Trial.id == SiteTrial.trial_id)
+            .where(SiteTrial.org_id == org_id, SiteTrial.active.is_(True))
+        )
+    ).all()
+    arms_by_trial: dict[UUID, list[Arm]] = {}
+    for arm in (await db.execute(select(Arm).where(Arm.org_id == org_id))).scalars().all():
+        arms_by_trial.setdefault(arm.trial_id, []).append(arm)
+
+    out: dict[UUID, list[tuple[Trial, Arm]]] = {}
+    for site_id, trial in assignments:
+        for arm in arms_by_trial.get(trial.id, []):
+            out.setdefault(site_id, []).append((trial, arm))
+    for groups in out.values():
+        groups.sort(key=lambda ta: (ta[0].name.lower(), ta[1].name.lower()))
+    return out
+
+
+async def _projections_grid_template(org_id: UUID, db: AsyncSession) -> bytes:
+    from openpyxl.styles import Font, PatternFill
+
+    fill = PatternFill("solid", fgColor="E2E8F0")
+    bold = Font(bold=True)
+
+    wb = Workbook()
+    instr = wb.active
+    assert instr is not None
+    instr.title = "Instructions"
+    for line in (
+        ["Projections import — one tab per site"],
+        [],
+        ["• Each site has its own tab. Don't rename tabs or move the three header rows."],
+        ["• Row 1 = study, Row 2 = arm, Row 3 = column labels."],
+        ["• Enter weekly projected counts under each study's Screened / Randomized columns."],
+        ["• week_start dates are Mondays. Leave a cell blank for 'no projection' that week."],
+        ["• Re-importing overwrites the same (site, study, arm, week). Sites/studies you"],
+        ["  don't touch are untouched."],
+    ):
+        instr.append(line)
+    instr["A1"].font = bold
+
+    sites = (
+        await db.execute(select(Site).where(Site.org_id == org_id).order_by(Site.name))
+    ).scalars().all()
+    groups_by_site = await _studies_by_site(org_id, db)
+    mondays = _twelve_week_mondays()
+    used_titles = {"instructions"}
+
+    if not sites:
+        ws = wb.create_sheet("No sites")
+        ws.append(["No sites yet — create a site (and assign studies) first."])
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    for site in sites:
+        ws = wb.create_sheet(_safe_sheet_title(site.name, used_titles))
+        groups = groups_by_site.get(site.id, [])
+
+        row1: list[object] = [site.name]
+        row2: list[object] = [""]
+        row3: list[object] = ["week_start"]
+        for trial, arm in groups:
+            row1 += [trial.name, ""]
+            row2 += [arm.name, ""]
+            row3 += ["Screened", "Randomized"]
+        ws.append(row1)
+        ws.append(row2)
+        ws.append(row3)
+        for m in mondays:
+            ws.append([m.isoformat()] + [""] * (2 * len(groups)))
+
+        # Merge + style each study's 2-col group header; bold the header rows.
+        for gi in range(len(groups)):
+            c = 2 + 2 * gi
+            ws.merge_cells(start_row=1, start_column=c, end_row=1, end_column=c + 1)
+            ws.merge_cells(start_row=2, start_column=c, end_row=2, end_column=c + 1)
+        for r in (1, 2, 3):
+            for cell in ws[r]:
+                cell.font = bold
+                cell.fill = fill
+        ws.freeze_panes = "B4"  # keep week_start col + header rows visible
+        _autosize(ws)
+
+        if not groups:
+            ws.append([])
+            ws.append(["(no studies assigned to this site yet)"])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # Upload normalization — let users hand us either CSV bytes or the
 # XLSX template back (whether or not they edited the Reference sheet).
 # Everything downstream operates on a CSV string.
 
 
 def normalize_upload(filename: str, raw: bytes) -> str:
-    """Return CSV text for the validator. Detects XLSX by extension; if
-    given a .xlsx, reads the **first** sheet (which is always 'Template'
-    in our generated workbooks; users may also rename it). The Reference
-    sheet is ignored on upload."""
+    """Return CSV text for the validator. Detects XLSX by extension.
+
+    Two XLSX shapes are accepted:
+      - **Flat** (sites/trials, and the legacy projections CSV): a single data
+        sheet whose first row is the column header. We flatten the first sheet.
+      - **Projections grid** (the new per-site template): one sheet per site
+        with study column groups. We flatten *all* site sheets into the same
+        legacy ``site_name,trial_name,arm_name,week_start,...`` CSV the
+        projections validator already understands, so nothing downstream changes.
+    The Reference / Instructions sheet is ignored on upload either way."""
     is_xlsx = filename.lower().endswith(".xlsx")
     # openpyxl reads .xlsx; passing CSV bytes through would crash, so we
     # branch on extension. (Sniffing magic bytes is brittle.)
     if not is_xlsx:
         return raw.decode("utf-8-sig", errors="replace")
-    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    # Not read_only: the grid flattener needs random cell access, and these
+    # workbooks are tiny (per-site sheets, ~12 rows).
+    wb = load_workbook(io.BytesIO(raw), data_only=True)
+    if _looks_like_projection_grid(wb):
+        return _flatten_projection_grid(wb)
     ws = wb.worksheets[0]
     out = io.StringIO()
     writer = csv.writer(out)
@@ -222,6 +354,75 @@ def normalize_upload(filename: str, raw: bytes) -> str:
         if all(v is None or v == "" for v in row):
             continue
         writer.writerow(["" if v is None else _xlsx_cell_to_str(v) for v in row])
+    return out.getvalue()
+
+
+def _looks_like_projection_grid(wb) -> bool:
+    """A per-site projections grid sheet carries the literal ``week_start`` in
+    cell A3 (row 3). The flat templates never do (their headers are in row 1),
+    so this cleanly distinguishes the two without sniffing."""
+    for ws in wb.worksheets:
+        if ws.title.strip().lower() == "instructions":
+            continue
+        if str(ws.cell(row=3, column=1).value or "").strip().lower() == "week_start":
+            return True
+    return False
+
+
+def _flatten_projection_grid(wb) -> str:
+    """Flatten the per-site grid workbook into the legacy projections CSV.
+
+    For each site sheet: site name from A1, study from row 1, arm from row 2,
+    Screened/Randomized from the column pair under each study, weeks from
+    column A (row 4 down). A (week, study) with *both* cells blank is skipped
+    (no projection); a half-filled pair fills the blank side with 0."""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(
+        ["site_name", "trial_name", "arm_name", "week_start",
+         "proj_screened", "proj_randomized"]
+    )
+    for ws in wb.worksheets:
+        if ws.title.strip().lower() == "instructions":
+            continue
+        if str(ws.cell(row=3, column=1).value or "").strip().lower() != "week_start":
+            continue
+        site_name = str(ws.cell(row=1, column=1).value or "").strip()
+        if not site_name:
+            continue
+
+        # Discover study column groups: row 1 trial name at col 2, 4, 6, …
+        groups: list[tuple[str, str, int]] = []  # (trial, arm, screened_col)
+        col = 2
+        while True:
+            trial = ws.cell(row=1, column=col).value
+            if trial is None or str(trial).strip() == "":
+                break
+            arm = ws.cell(row=2, column=col).value
+            groups.append(
+                (str(trial).strip(), str(arm).strip() if arm else "Default Arm", col)
+            )
+            col += 2
+        if not groups:
+            continue
+
+        for r in range(4, ws.max_row + 1):
+            wk = ws.cell(row=r, column=1).value
+            if wk is None or str(wk).strip() == "":
+                continue
+            wk_str = _xlsx_cell_to_str(wk)
+            for trial, arm, sc in groups:
+                sv = ws.cell(row=r, column=sc).value
+                rv = ws.cell(row=r, column=sc + 1).value
+                s_blank = sv is None or str(sv).strip() == ""
+                r_blank = rv is None or str(rv).strip() == ""
+                if s_blank and r_blank:
+                    continue
+                writer.writerow(
+                    [site_name, trial, arm, wk_str,
+                     "0" if s_blank else _xlsx_num_to_str(sv),
+                     "0" if r_blank else _xlsx_num_to_str(rv)]
+                )
     return out.getvalue()
 
 
@@ -233,6 +434,17 @@ def _xlsx_cell_to_str(v: object) -> str:
     if isinstance(v, date):
         return v.isoformat()
     return str(v)
+
+
+def _xlsx_num_to_str(v: object) -> str:
+    """Numeric projection cells come back as int or float (Excel stores all
+    numbers as doubles). Render whole numbers without a trailing '.0' so the
+    integer validator stays happy; leave non-numerics for it to reject."""
+    if isinstance(v, bool):  # bool is an int subclass — guard first
+        return str(v)
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v).strip()
 
 
 # ---------------------------------------------------------------------------

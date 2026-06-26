@@ -30,7 +30,7 @@ const KIND_HINT: Record<Kind, string> = {
   trials:
     "One row per (trial, site) assignment. Trial-level fields can be left blank on rows 2+ for the same trial (inherit). Sum of per-site targets must equal the study targets. Imports as draft. The XLSX template's Reference sheet lists your existing site names so you can paste them in exactly.",
   projections:
-    "One row per (site, trial, arm, week). week_start must be a Monday. arm_name left blank → \"Default Arm\". Re-uploading an existing week overwrites the projection (actuals untouched). The XLSX template's Reference sheet lists your existing trial + arm names.",
+    "The XLSX template has one tab per site, laid out like the Projections page: each assigned study is a Screened / Randomized column group with weeks (Mondays) down the rows. Fill the numbers under each study and upload the workbook directly — blank cells mean \"no projection\"; re-uploading overwrites the same week (actuals untouched). A flat CSV (site_name, trial_name, arm_name, week_start, …) is still accepted too.",
 };
 
 export default function Import({ me }: { me: Me }) {
