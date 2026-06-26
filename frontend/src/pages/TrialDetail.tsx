@@ -37,6 +37,7 @@ import {
 } from "../api";
 import { KpiStrip } from "../components/KpiStrip";
 import { SoaReviewTable } from "../components/SoaReviewTable";
+import { TrialStatusActions } from "../components/TrialStatusActions";
 import { trialColor } from "../lib/trialColors";
 import { fmtCount, fmtMonDay, fmtPct, fmtUsd } from "../lib/formatters";
 
@@ -173,7 +174,9 @@ export default function TrialDetail() {
           className={`rounded px-2 py-0.5 text-xs ${
             trial.status === "active"
               ? "bg-emerald-100 text-emerald-900"
-              : "bg-slate-100 text-slate-700"
+              : trial.status === "planned"
+                ? "bg-indigo-100 text-indigo-900"
+                : "bg-slate-100 text-slate-700"
           }`}
         >
           {trial.status}
@@ -196,6 +199,17 @@ export default function TrialDetail() {
           network forecast and metrics — no re-publish step (PRD §5.2).
         </div>
       )}
+
+      {trial.status === "planned" && (
+        <div className="mb-4 rounded border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+          <strong>This trial is planned.</strong> It contributes to the{" "}
+          <em>planned</em> and <em>combined</em> forecast scopes, not the default
+          active view.
+        </div>
+      )}
+
+      {/* Inline lifecycle control — renders only for draft/planned + editors. */}
+      <TrialStatusActions trialId={trialId} status={trial.status} variant="panel" />
 
       <section className="mb-4 grid gap-3 rounded border border-slate-200 bg-white p-4 text-sm md:grid-cols-3">
         <KvP label="FPFV" value={trial.fpfv} />

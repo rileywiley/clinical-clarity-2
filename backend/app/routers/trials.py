@@ -162,6 +162,42 @@ async def activate_trial(
     return t
 
 
+@router.post(
+    "/{trial_id}/plan",
+    response_model=TrialOut,
+    responses={422: {"model": TrialActivationErrorOut}},
+    dependencies=[Depends(require_role(*WRITE_ROLES))],
+)
+async def plan_trial(
+    trial_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Trial:
+    """Mark a fully-configured trial as ``planned`` — forecast-ready but
+    scheduled to start in the future (PRD §6.9 / §7.1). Requires the *same*
+    completeness as activation (SoA + randomization visit, ≥1 site, attrition
+    curve), so promoting planned → active later is just a flip. Reachable from
+    draft or active (e.g. a start date slipped)."""
+    t = await db.get(Trial, trial_id)
+    if t is None or t.org_id != user.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if t.status is TrialStatus.PLANNED:
+        return t
+    failures = await validate_can_activate(db, t)
+    if failures:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "failures": [
+                    TrialActivationFailureOut(reason=f.reason, detail=f.detail).model_dump()
+                    for f in failures
+                ]
+            },
+        )
+    t.status = TrialStatus.PLANNED
+    return t
+
+
 # --- Archive + Delete (admin-only) -------------------------------------
 
 ADMIN_ONLY = (UserRole.ORG_ADMIN,)
@@ -264,16 +300,17 @@ async def delete_trial(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Hard-delete a trial + all its arms / visits / assignments / weeks /
-    snapshots (FK cascades). Blocked while the trial is active — the
-    operator must archive it first, which is the load-bearing safety
-    against fat-fingering an active trial out of existence."""
+    snapshots (FK cascades). Blocked while the trial is active *or planned* —
+    the operator must archive it first, which is the load-bearing safety
+    against fat-fingering a forecast-contributing trial out of existence.
+    Planned trials feed the pipeline forecast, so they get the same guard."""
     t = await db.get(Trial, trial_id)
     if t is None or t.org_id != user.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
-    if t.status is TrialStatus.ACTIVE:
+    if t.status in (TrialStatus.ACTIVE, TrialStatus.PLANNED):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            detail="active trials cannot be deleted; archive first",
+            detail=f"{t.status.value} trials cannot be deleted; archive first",
         )
     await db.delete(t)
 

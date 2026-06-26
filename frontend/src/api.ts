@@ -51,10 +51,17 @@ export type SiteOut = {
   active: boolean;
 };
 
+// Trial lifecycle (PRD §7.1). `planned` = fully configured, starting in the
+// future; forecast-ready but reported separately from `active`.
+export type TrialStatus = "draft" | "planned" | "active" | "archived";
+
+// Which trial statuses a forecast/report includes (PRD §6.9).
+export type ForecastScope = "active" | "planned" | "combined";
+
 export type TrialOut = {
   id: string;
   name: string;
-  status: "draft" | "active" | "archived";
+  status: TrialStatus;
   fpfv: string;
   lpfv: string;
   lplv: string;
@@ -229,7 +236,7 @@ export const api = {
       Array<
         SiteTrialOut & {
           trial_name: string;
-          trial_status: "draft" | "active" | "archived";
+          trial_status: TrialStatus;
         }
       >
     >(`/sites/${siteId}/trials`),
@@ -263,10 +270,11 @@ export const api = {
     request<TrialVarianceOut>(`/trials/${trialId}/variance`),
 
   // Phase 4 — forecast + metrics
-  networkForecast: (from?: string, to?: string) => {
+  networkForecast: (from?: string, to?: string, scope?: ForecastScope) => {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
+    if (scope) qs.set("scope", scope);
     return request<ForecastCellOut[]>(
       `/forecast/network${qs.toString() ? "?" + qs : ""}`,
     );
@@ -313,7 +321,10 @@ export const api = {
       `/sites/${siteId}/metrics${qs.toString() ? "?" + qs : ""}`,
     );
   },
-  listActiveTrials: () => request<ActiveTrialOut[]>("/active-trials"),
+  listActiveTrials: (scope?: ForecastScope) =>
+    request<ActiveTrialOut[]>(
+      `/active-trials${scope ? `?scope=${scope}` : ""}`,
+    ),
 
   // Phase 5 — trial setup wizard
   createTrial: (payload: TrialIn) =>
@@ -328,6 +339,8 @@ export const api = {
     }),
   activateTrial: (trialId: string) =>
     request<TrialOut>(`/trials/${trialId}/activate`, { method: "POST" }),
+  planTrial: (trialId: string) =>
+    request<TrialOut>(`/trials/${trialId}/plan`, { method: "POST" }),
   listVisits: (armId: string) =>
     request<
       Array<{

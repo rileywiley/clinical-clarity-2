@@ -1,8 +1,9 @@
 /**
  * Studies dashboard (post-Phase-6).
  *
- * One row per trial, grouped by status (Active first, then Draft, then
- * Archived). Click a row to open the existing /trials/:id detail page.
+ * One row per trial, grouped by status (Active, then Planned, then Draft,
+ * then Archived). Planned = future pipeline (PRD §6.9). Click a row to open
+ * the existing /trials/:id detail page.
  * Visible to every role — viewers see the dashboard but lose the
  * editing affordances on the detail page.
  */
@@ -10,16 +11,17 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type TrialOut } from "../api";
+import { api, type TrialOut, type TrialStatus } from "../api";
 import { TrialColorBadge } from "../components/TrialColorBadge";
+import { TrialStatusActions } from "../components/TrialStatusActions";
 import { EmptyState } from "../components/EmptyState";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { fmtCount } from "../lib/formatters";
 
-type Status = "active" | "draft" | "archived";
-const STATUS_ORDER: Status[] = ["active", "draft", "archived"];
-const STATUS_LABEL: Record<Status, string> = {
+const STATUS_ORDER: TrialStatus[] = ["active", "planned", "draft", "archived"];
+const STATUS_LABEL: Record<TrialStatus, string> = {
   active: "Active",
+  planned: "Planned",
   draft: "Draft",
   archived: "Archived",
 };
@@ -37,13 +39,14 @@ export default function Studies() {
   // /trials/:id/sites — fan-out is fine here because the dashboard is
   // typically small. TanStack Query will dedupe + cache.
   const grouped = useMemo(() => {
-    const m: Record<Status, TrialOut[]> = {
+    const m: Record<TrialStatus, TrialOut[]> = {
       active: [],
+      planned: [],
       draft: [],
       archived: [],
     };
     for (const t of trials) {
-      const s = (t.status as Status) ?? "draft";
+      const s = (t.status as TrialStatus) ?? "draft";
       (m[s] ?? m.draft).push(t);
     }
     for (const s of STATUS_ORDER) {
@@ -101,6 +104,9 @@ export default function Studies() {
                     <th className="px-3 py-2">LPLV</th>
                     <th className="px-3 py-2 text-right">Rand target</th>
                     <th className="px-3 py-2 text-right">Screen target</th>
+                    {(s === "draft" || s === "planned") && (
+                      <th className="px-3 py-2 text-right">Actions</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -124,6 +130,15 @@ export default function Studies() {
                       <td className="px-3 py-1.5 text-right">
                         {fmtCount(t.screening_target)}
                       </td>
+                      {(s === "draft" || s === "planned") && (
+                        <td className="px-3 py-1.5 text-right">
+                          <TrialStatusActions
+                            trialId={t.id}
+                            status={t.status}
+                            variant="inline"
+                          />
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

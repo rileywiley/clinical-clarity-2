@@ -18,9 +18,16 @@ from app.deps import get_current_user, get_db
 from app.models.site import Site
 from app.models.user import User
 from app.services.csv_export import cells_to_csv
-from app.services.forecast_adapter import compute_network_forecast
+from app.services.forecast_adapter import ForecastScope, compute_network_forecast
 
 router = APIRouter(tags=["exports"])
+
+# Same scope param as the forecast endpoints so an export reflects exactly the
+# scope the operator was viewing (PRD §6.9). Defaults to active.
+ScopeParam = Query(
+    default=ForecastScope.ACTIVE,
+    description="Trial-status scope: active (default), planned, or combined.",
+)
 
 
 def _monday(d: date) -> date:
@@ -41,12 +48,13 @@ async def network_forecast_csv(
     db: AsyncSession = Depends(get_db),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
+    scope: ForecastScope = ScopeParam,
 ) -> Response:
     today = date.today()
     f = _monday(from_date if from_date else today)
     t = to_date if to_date else f + timedelta(weeks=12)
     cells = await compute_network_forecast(
-        db, user.org_id, today=today, horizon_end=t
+        db, user.org_id, today=today, horizon_end=t, scope=scope
     )
     in_range = [c for c in cells.values() if f <= c.week_start <= t]
     return _csv_response(
@@ -62,6 +70,7 @@ async def site_forecast_csv(
     db: AsyncSession = Depends(get_db),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
+    scope: ForecastScope = ScopeParam,
 ) -> Response:
     site = await db.get(Site, site_id)
     if site is None or site.org_id != user.org_id:
@@ -70,7 +79,7 @@ async def site_forecast_csv(
     f = _monday(from_date if from_date else today)
     t = to_date if to_date else f + timedelta(weeks=18)
     cells = await compute_network_forecast(
-        db, user.org_id, today=today, horizon_end=t, site_ids=[site_id]
+        db, user.org_id, today=today, horizon_end=t, site_ids=[site_id], scope=scope
     )
     in_range = [
         c

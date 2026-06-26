@@ -6,11 +6,12 @@
  * Click row label or cell → /sites/:id.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
-import type { ForecastCellOut } from "../api";
+import type { ForecastCellOut, ForecastScope } from "../api";
+import { ScopeToggle } from "../components/ScopeToggle";
 import { KpiStrip } from "../components/KpiStrip";
 import { bandClasses, classifyUtil, type UtilThresholds } from "../lib/utilization";
 import { fmtCount, fmtMonDay, fmtPct, fmtUsd } from "../lib/formatters";
@@ -41,6 +42,9 @@ export default function NetworkGrid() {
   const todayMonday = useMemo(() => isoMondayOf(isoToday()), []);
   const from = todayMonday;
   const to = useMemo(() => addWeeks(todayMonday, 11), [todayMonday]);
+  // Reporting scope (PRD §6.9): active (committed) / planned (pipeline) /
+  // combined. Default active preserves the original network view.
+  const [scope, setScope] = useState<ForecastScope>("active");
 
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const settingsQ = useQuery({
@@ -56,12 +60,12 @@ export default function NetworkGrid() {
     },
   });
   const cellsQ = useQuery({
-    queryKey: ["forecast-network", from, to],
-    queryFn: () => api.networkForecast(from, to),
+    queryKey: ["forecast-network", from, to, scope],
+    queryFn: () => api.networkForecast(from, to, scope),
   });
   const trialsQ = useQuery({
-    queryKey: ["trials-active"],
-    queryFn: api.listActiveTrials,
+    queryKey: ["trials-scoped", scope],
+    queryFn: () => api.listActiveTrials(scope),
   });
 
   const navigate = useNavigate();
@@ -143,6 +147,7 @@ export default function NetworkGrid() {
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Network forecast</h1>
         <nav className="flex items-center gap-3 text-sm no-print">
+          <ScopeToggle value={scope} onChange={setScope} />
           <Link to="/projections" className="text-slate-600 hover:underline">
             Projections
           </Link>
@@ -150,7 +155,7 @@ export default function NetworkGrid() {
             Metrics
           </Link>
           <a
-            href="/api/forecast/network.csv"
+            href={`/api/forecast/network.csv?scope=${scope}`}
             className="rounded border border-slate-300 px-3 py-1.5 text-slate-700"
             data-testid="export-network-csv"
           >
@@ -202,7 +207,8 @@ export default function NetworkGrid() {
       {trialsQ.data && trialsQ.data.length > 0 && (
         <div className="mb-3 text-xs text-slate-500">
           <span className="mr-2 font-medium uppercase tracking-wide">Past · Today · Future</span>
-          {trialsQ.data.length} active {trialsQ.data.length === 1 ? "trial" : "trials"}
+          {trialsQ.data.length} {scope === "combined" ? "active + planned" : scope}{" "}
+          {trialsQ.data.length === 1 ? "trial" : "trials"}
         </div>
       )}
 

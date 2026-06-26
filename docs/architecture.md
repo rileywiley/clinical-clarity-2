@@ -16,7 +16,7 @@ flowchart LR
     API_CLIENT[api.ts]
     SHEET["components/SpreadsheetGrid<br/>(headless: useKeyboardNav,<br/>useClipboardPaste)"]
     VAR["components/VarianceHint<br/>HistoryDrawer"]
-    KPI["components/KpiStrip<br/>TrialColorBadge"]
+    KPI["components/KpiStrip<br/>TrialColorBadge<br/>ScopeToggle (post-P6)"]
     EMPTY["components/EmptyState (Phase 6)<br/>marked .no-print"]
     GUARD["hooks/useUnsavedChangesGuard<br/>(useBlocker + beforeunload)"]
     HOOKS6["hooks (Phase 6):<br/>useDocumentTitle,<br/>usePrintToPdf"]
@@ -225,7 +225,8 @@ flowchart LR
 - **Service layer** (`app/services/`) is new in Phase 2. `resolution.py` is intentionally the same shape as `engine/duration.py` — Phase 4 will use it to build the `OrgDurationDefaults` dataclass that gets handed into the engine. `trial_activation.py` returns a structured failure list rather than fail-fast, so the wizard UI in Phase 5 can surface every blocker together. Phase 3 added `enrollment_audit.py` (one history row per *changed* projection field; actuals are never audited) and `enrollment_variance.py` (PRD §7.3 warn-and-allow, never blocks).
 - **SpreadsheetGrid** (frontend, Phase 3) is built generic over a row shape. Phase 4's NetworkGrid uses a purpose-built `<table>` instead — sites-as-rows × weeks-as-columns with hover tooltips and click-to-drill was different enough that a dedicated component was clearer than over-loading the spreadsheet primitive. Both serve different needs; both are well-tested.
 - **Trial colors are deterministic** (`lib/trialColors.ts`, djb2 hash of `trial_id` → fixed 12-color palette). Same color everywhere — network legend, per-site chart series, trial-detail header, metrics-page badges. No DB column needed.
-- **`/active-trials`** lives at the top level, **not** at `/trials/active`. FastAPI matches `/trials/{trial_id}` first and would try to parse "active" as a UUID. Caught during Phase 4 smoke; named to be self-documenting.
+- **`/active-trials`** lives at the top level, **not** at `/trials/active`. FastAPI matches `/trials/{trial_id}` first and would try to parse "active" as a UUID. Caught during Phase 4 smoke; named to be self-documenting. Post-P6 it takes a `scope` param so the legend matches the plotted scope.
+- **Forecast scope** (post-P6, PRD §6.9) is the single seam where trial status selects what's forecast. `forecast_adapter.ForecastScope` (active/planned/combined) → `scope_statuses()` → `build_commitments(statuses=…)`. Every forecast/metrics/export endpoint threads one `scope` query param (default `active`, preserving prior behavior); the frontend `ScopeToggle` drives it. The `planned` status (future pipeline) is forecast with the *same* engine math as `active` — the engine never learns about status, so golden rules #2/#5 are untouched.
 - **`useUnsavedChangesGuard`** is the project-wide form-exit guard (per saved feedback memory: every Save-button form must use it). Hooks into React Router 6's `useBlocker` for in-app navigation and `beforeunload` for tab close. Phase 5's trial setup wizard and Phase 6's admin settings page will both reuse it.
 - **`arq worker`** is now live (Phase 5). One job: `parse_soa(document_id, org_id, parse_job_id)` pulls the PDF from S3/MinIO, calls Claude with the cached system prompt, persists `parsed_visits` + `raw_output` to the `SoaParseJob` row. Failures get a `failed` status with the error message so the user can retry.
 - **`Document` / `SoaParseJob`** (Phase 5) keep AI output **out** of the engine until the user confirms. The engine reads `Visit` rows; `parsed_visits` stays in JSONB until the apply endpoint creates real Visit rows from the user's *edited* payload. This is the PRD §10.2 mitigation made structural.

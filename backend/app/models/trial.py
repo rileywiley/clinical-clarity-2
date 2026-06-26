@@ -13,6 +13,11 @@ from app.models.base import Base, OrgScopedMixin, TimestampMixin, new_uuid
 
 class TrialStatus(enum.StrEnum):
     DRAFT = "draft"
+    # A fully-configured trial scheduled to start in the future, not yet running.
+    # Forecast-ready (same completeness as ACTIVE) but reported separately so the
+    # network forecast can split committed (active) from pipeline (planned) volume.
+    # See PRD §6.9 (forecast scope) and §7.1 (lifecycle).
+    PLANNED = "planned"
     ACTIVE = "active"
     ARCHIVED = "archived"
 

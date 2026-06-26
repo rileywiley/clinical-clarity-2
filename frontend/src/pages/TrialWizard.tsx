@@ -1037,38 +1037,55 @@ function ActivateStep({ trialId }: { trialId: string }) {
   const [failures, setFailures] = useState<
     Array<{ reason: string; detail: string }> | null
   >(null);
-  const [activated, setActivated] = useState(false);
+  // null = not yet transitioned; otherwise which status we landed in.
+  const [outcome, setOutcome] = useState<"active" | "planned" | null>(null);
+
+  const onError = (err: unknown) => {
+    if (err instanceof ApiError && err.status === 422) {
+      const body = err.body as
+        | { detail?: { failures?: Array<{ reason: string; detail: string }> } }
+        | null;
+      setFailures(body?.detail?.failures ?? []);
+    } else {
+      setFailures([{ reason: "unknown_error", detail: String(err) }]);
+    }
+  };
 
   const activate = useMutation({
     mutationFn: async () => await api.activateTrial(trialId),
     onSuccess: () => {
       setFailures(null);
-      setActivated(true);
+      setOutcome("active");
     },
-    onError: (err: unknown) => {
-      if (err instanceof ApiError && err.status === 422) {
-        const body = err.body as
-          | { detail?: { failures?: Array<{ reason: string; detail: string }> } }
-          | null;
-        setFailures(body?.detail?.failures ?? []);
-      } else {
-        setFailures([{ reason: "unknown_error", detail: String(err) }]);
-      }
-    },
+    onError,
   });
+
+  // Same readiness gate as activation, but parks the trial as future pipeline.
+  const plan = useMutation({
+    mutationFn: async () => await api.planTrial(trialId),
+    onSuccess: () => {
+      setFailures(null);
+      setOutcome("planned");
+    },
+    onError,
+  });
+
+  const busy = activate.isPending || plan.isPending;
 
   return (
     <section className="rounded border border-slate-200 bg-white p-4">
-      <h2 className="mb-2 text-base font-semibold">Activate</h2>
+      <h2 className="mb-2 text-base font-semibold">Activate or plan</h2>
       <p className="mb-3 text-sm text-slate-500">
-        Activation requires: a randomization visit, at least one assigned site,
-        and an attrition curve. Pricing is not required (volume-ready ≠
-        revenue-ready).
+        Both require: a randomization visit, at least one assigned site, and an
+        attrition curve (pricing not required). Choose <strong>Activate</strong>{" "}
+        if the trial is running now, or <strong>Mark as planned</strong> if it's
+        configured but starts in the future — planned trials are forecast as a
+        separate pipeline (PRD §6.9).
       </p>
-      {activated ? (
+      {outcome ? (
         <div data-testid="activate-success" className="rounded border border-emerald-200 bg-emerald-50 p-3">
           <p className="font-medium text-emerald-900">
-            ✓ Trial activated.
+            {outcome === "active" ? "✓ Trial activated." : "✓ Trial marked as planned."}
           </p>
           <p className="mt-1 text-sm text-emerald-900">
             Next: enter your per-site weekly screening + randomization
@@ -1094,15 +1111,26 @@ function ActivateStep({ trialId }: { trialId: string }) {
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => activate.mutate()}
-          disabled={activate.isPending}
-          className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:opacity-40"
-          data-testid="activate-button"
-        >
-          {activate.isPending ? "Activating…" : "Activate trial"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => activate.mutate()}
+            disabled={busy}
+            className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:opacity-40"
+            data-testid="activate-button"
+          >
+            {activate.isPending ? "Activating…" : "Activate trial"}
+          </button>
+          <button
+            type="button"
+            onClick={() => plan.mutate()}
+            disabled={busy}
+            className="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-700 disabled:opacity-40"
+            data-testid="plan-button"
+          >
+            {plan.isPending ? "Marking…" : "Mark as planned"}
+          </button>
+        </div>
       )}
       {failures && failures.length > 0 && (
         <div

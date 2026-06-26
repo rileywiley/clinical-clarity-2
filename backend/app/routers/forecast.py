@@ -34,13 +34,25 @@ from app.schemas.forecast import (
     TrialMetricsOut,
     WeekRangeOut,
 )
-from app.services.forecast_adapter import build_commitments, compute_network_forecast
+from app.services.forecast_adapter import (
+    ForecastScope,
+    build_commitments,
+    compute_network_forecast,
+    scope_statuses,
+)
 from app.services.metrics_adapter import (
     compute_site_metrics_per_trial,
     compute_trial_metrics,
 )
 
 router = APIRouter(tags=["forecast"])
+
+# Shared query param: which trial statuses a report includes (PRD §6.9).
+# Defaults to active-only so existing callers keep today's behavior.
+ScopeParam = Query(
+    default=ForecastScope.ACTIVE,
+    description="Trial-status scope: active (default), planned, or combined.",
+)
 
 
 def _monday(d: date) -> date:
@@ -103,13 +115,14 @@ async def network_forecast(
     db: AsyncSession = Depends(get_db),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
+    scope: ForecastScope = ScopeParam,
 ) -> list[ForecastCellOut]:
     today = date.today()
     f = _monday(from_date if from_date else today)
     # Default horizon: 12 weeks visible (matches PRD §8.1 default).
     t = to_date if to_date else f + timedelta(weeks=12)
     cells = await compute_network_forecast(
-        db, user.org_id, today=today, horizon_end=t
+        db, user.org_id, today=today, horizon_end=t, scope=scope
     )
     # Filter to cells inside [f, t] — compute_forecast may emit one Monday
     # before today (today's Monday) which we want included; nothing earlier.
@@ -131,6 +144,7 @@ async def site_forecast(
     db: AsyncSession = Depends(get_db),
     from_date: date | None = Query(default=None, alias="from"),
     to_date: date | None = Query(default=None, alias="to"),
+    scope: ForecastScope = ScopeParam,
 ) -> list[ForecastCellOut]:
     site = await db.get(Site, site_id)
     if site is None or site.org_id != user.org_id:
@@ -139,7 +153,7 @@ async def site_forecast(
     f = _monday(from_date if from_date else today)
     t = to_date if to_date else f + timedelta(weeks=18)  # longer for chart
     cells = await compute_network_forecast(
-        db, user.org_id, today=today, horizon_end=t, site_ids=[site_id]
+        db, user.org_id, today=today, horizon_end=t, site_ids=[site_id], scope=scope
     )
     return [
         _cell_to_out(c)
@@ -160,13 +174,14 @@ async def site_calendar(
     month: str = Query(..., description="YYYY-MM"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    scope: ForecastScope = ScopeParam,
 ) -> list[DailyVisitsOut]:
     site = await db.get(Site, site_id)
     if site is None or site.org_id != user.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     first, last = _parse_month(month)
     commitments = await build_commitments(
-        db, user.org_id, site_ids=[site_id]
+        db, user.org_id, site_ids=[site_id], statuses=scope_statuses(scope)
     )
     daily = compute_daily_forecast(commitments, str(site_id), first, last)
     return [
@@ -201,8 +216,10 @@ async def trial_forecast(
     today = date.today()
     f = _monday(from_date if from_date else today)
     t = to_date if to_date else f + timedelta(weeks=18)
+    # A trial-detail forecast previews this specific trial regardless of its
+    # status (draft/planned/active/archived) — scope filtering doesn't apply.
     cells = await compute_network_forecast(
-        db, user.org_id, today=today, horizon_end=t, trial_ids=[trial_id]
+        db, user.org_id, today=today, horizon_end=t, trial_ids=[trial_id], any_status=True
     )
     return [
         _cell_to_out(c) for c in cells.values() if f <= c.week_start <= t
@@ -260,6 +277,7 @@ async def site_metrics(
     db: AsyncSession = Depends(get_db),
     window_start: date | None = Query(default=None),
     window_end: date | None = Query(default=None),
+    scope: ForecastScope = ScopeParam,
 ) -> list[TrialMetricsOut]:
     site = await db.get(Site, site_id)
     if site is None or site.org_id != user.org_id:
@@ -274,6 +292,7 @@ async def site_metrics(
         window_start=ws,
         window_end=we,
         today=today,
+        statuses=scope_statuses(scope),
     )
     return [
         TrialMetricsOut(
@@ -294,21 +313,25 @@ async def site_metrics(
 async def list_active_trials(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    scope: ForecastScope = ScopeParam,
 ) -> list[dict]:
-    """Lightweight list of active trials for color legend population in the
-    network-level views. Returns just id + name.
+    """Lightweight list of in-scope trials for color legend population in the
+    network-level views. Returns just id + name. Honors the same ``scope`` as
+    the forecast so the legend matches what's plotted (PRD §6.9); defaults to
+    active so the legacy ``/active-trials`` name still reads true.
 
     Note: lives at ``/active-trials`` (not ``/trials/active``) because the
     trials router registers ``/trials/{trial_id}`` first, which would shadow
     any ``/trials/active`` route — FastAPI would try to parse ``"active"`` as
     a UUID and return 422.
     """
-    from app.models.trial import TrialStatus
-
     rows = (
         await db.execute(
             select(Trial.id, Trial.name)
-            .where(Trial.org_id == user.org_id, Trial.status == TrialStatus.ACTIVE)
+            .where(
+                Trial.org_id == user.org_id,
+                Trial.status.in_(scope_statuses(scope)),
+            )
             .order_by(Trial.name)
         )
     ).all()

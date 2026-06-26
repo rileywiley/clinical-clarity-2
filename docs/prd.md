@@ -119,7 +119,8 @@ All entities carry `org_id`, `created_at`, `updated_at` unless noted.
 `id, org_id, name, address, timezone (IANA), operating_weekdays (set, e.g. {Mon..Fri}), hours_per_day (numeric, default 10), rooms (int), active (bool)`
 
 **Trial**
-`id, org_id, name, sponsor, protocol_ref, status (enum: draft|active|archived), fpfv (date), lpfv (date), lplv (date), is_multi_arm (bool), enrollment_target (int, trial-level randomization goal), screening_target (int, trial-level screening goal), attrition_curve_id, pending_amendment (bool, default false)`
+`id, org_id, name, sponsor, protocol_ref, status (enum: draft|planned|active|archived), fpfv (date), lpfv (date), lplv (date), is_multi_arm (bool), enrollment_target (int, trial-level randomization goal), screening_target (int, trial-level screening goal), attrition_curve_id, pending_amendment (bool, default false)`
+- `status` lifecycle: **draft** (being set up) → **planned** (fully configured, expected to start in the future, not yet running) → **active** (running now) → **archived** (retired). `planned` and `active` are both forecast-ready and require identical completeness (see §7.1); the distinction exists purely so reporting can separate committed (active) volume from pipeline (planned) volume — see the forecast scope, §6.9.
 - `fpfv` = First Patient First Visit (enrollment window start)
 - `lpfv` = Last Patient First Visit (enrollment window close — bounds where projections may be non-zero)
 - `lplv` = Last Patient Last Visit (trial end — natural forecast horizon for this trial)
@@ -255,6 +256,15 @@ A sibling `metrics` module in the engine package computes operational metrics fr
 
 **Limitation to honor:** true cycle-time "speed" (e.g., screen-to-randomization interval) requires patient-level timing, which v1 does not track (aggregate actuals only). It is deferred alongside individual visit-level actuals (§10.1). The velocity metrics above are all computable from aggregate weekly data.
 
+### 6.9 Forecast scope (trial status)
+The engine itself is status-agnostic — it forecasts whatever cohorts it is handed. **Selection by trial status happens in the application layer, never in `/engine`** (golden rule #2). The forecast/metrics surfaces accept a **scope** selecting which trials contribute:
+
+- **Active** *(default)* — only `active` trials. Preserves the original "forecast committed work" behavior; this is what every view shows unless the operator chooses otherwise.
+- **Planned** — only `planned` trials. The future pipeline in isolation.
+- **Combined** — `active` + `planned` together, for the total expected picture.
+
+`draft` and `archived` trials are never forecast under any scope. Because a `planned` trial carries a future FPFV and future-dated enrollment weeks, it naturally contributes ~zero demand in the near term and ramps when it starts — so Combined is a true superset of Active, not a double-count. Scope applies uniformly to the network forecast, per-site forecast, capacity/utilization metrics, and exports, so a report can always state which scope it reflects.
+
 ---
 
 ## 7. Workflows
@@ -266,9 +276,9 @@ Guided wizard, **basics required up front**, then resumable in any order via "Sa
 3. **Sites & targets:** assign sites; set per-site enrollment target; optional site-specific duration overrides.
 4. **Visit pricing:** assign a USD price to each confirmed visit (uniform across sites).
 5. **Attrition:** assign a curve (default Standard).
-6. **Activate:** trial flips Draft → Active.
+6. **Activate / mark planned:** a fully set-up trial flips Draft → **Active** (running now) or Draft → **Planned** (configured but starting in the future). Both transitions require identical completeness (SoA with a randomization visit, ≥1 assigned site, attrition curve assigned; pricing **not** required). A Planned trial flips to Active when it actually starts. See §6.9 for how the two statuses are reported separately.
 
-Rules: **a trial must be fully set up (Active) before any projection can be entered against it.** Org Admin and Ops Lead can create/configure trials; Site Manager and Viewer cannot. A trial is "volume-ready" once SoA + sites + attrition exist, and "revenue-ready" once prices are entered.
+Rules: **a trial must be fully set up (Active or Planned) before any projection can be entered against it** — Planned trials carry their (future-dated) enrollment projections just like Active ones, which is what makes the pipeline forecastable. Org Admin and Ops Lead can create/configure trials; Site Manager and Viewer cannot. A trial is "volume-ready" once SoA + sites + attrition exist, and "revenue-ready" once prices are entered.
 
 ### 7.2 Site setup
 Attributes per §5.1 Site. Operating days are **specific weekdays**. Active/inactive flag (disable without delete). Site-specific visit durations are configured under trial setup (site-specific config), not here.

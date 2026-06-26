@@ -558,3 +558,31 @@ These are out-of-PRD enhancements shipped after the seven-phase gated build. The
 - 2 vitest cases: active-trial modal shows the archive block (no type-to-confirm input), site delete modal enables Confirm only after the exact name is typed.
 
 **Tests:** backend 73 (+7), engine 30, frontend 55 (+2).
+
+### Planned trial status + forecast scope (2026-06-25)
+
+**What:** A fourth trial status, **planned**, for fully-configured trials that start in the future. Forecasting becomes **scope-aware** (active / planned / combined) so reporting separates committed volume from the future pipeline. PRD updated first: §5.1 (status enum), new §6.9 (forecast scope), §7.1 (lifecycle: draft → planned → active → archived). The engine stays pure — scope selection is entirely in the adapter (golden rules #2/#5 hold).
+
+**Locked decisions:**
+1. **Forecast + segment, not exclude.** Planned trials are forecast with identical math; the network/site/exports/metrics surfaces take a `scope` param defaulting to `active`, so prior behavior is byte-for-byte preserved.
+2. **Planned requires the same readiness as active** (`validate_can_activate`: SoA + randomization visit, ≥1 site, attrition curve). planned→active is a re-validated flip.
+3. **Single chokepoint.** All status filtering lives in `forecast_adapter.build_commitments` (`statuses` param) + the `ForecastScope` enum; inactive sites/assignments are always excluded regardless of scope.
+4. **Planned trials are delete-guarded** like active (archive-first) — they feed the pipeline forecast.
+
+**Backend:**
+- `models/trial.py` — `TrialStatus.PLANNED`; migration `0008` (`ALTER TYPE trial_status ADD VALUE 'planned'`, downgrade no-op).
+- `services/forecast_adapter.py` — `ForecastScope` enum + `scope_statuses()`; `build_commitments(statuses=…)` replaces `active_only`; `compute_network_forecast(scope=…, any_status=…)`.
+- `services/metrics_adapter.py` — `compute_site_metrics_per_trial(statuses=…)`.
+- `routers/forecast.py` + `routers/exports.py` — shared `scope` query param on network/site/calendar/site-metrics/legend/exports; trial-detail forecast uses `any_status=True`.
+- `routers/trials.py` — `POST /trials/{id}/plan` (same gate as activate); delete blocked while planned.
+- 7 tests in `test_forecast_scope.py` (plan transition, scope filtering on network + legend, activate-from-planned, plan-readiness gate, delete guard).
+
+**Frontend:**
+- `components/ScopeToggle.tsx` — active/planned/combined segmented control.
+- `components/TrialStatusActions.tsx` — self-contained inline draft→planned/active transition control (reads `me` for permission, runs the validated `/activate` + `/plan` calls, shows the 422 failure list, invalidates forecast/legend/list caches). Used in two variants: `panel` on TrialDetail, `inline` in Studies rows. Renders nothing for active/archived trials or non-editing roles.
+- `pages/NetworkGrid.tsx` — scope toggle wired to forecast + legend + CSV href.
+- `pages/Studies.tsx` — Planned group/label + per-row Actions column (draft/planned only); `pages/TrialWizard.tsx` — "Mark as planned" alongside Activate; `pages/TrialDetail.tsx` — planned badge + banner + the inline action panel.
+- `api.ts` — `TrialStatus`/`ForecastScope` types, `scope` on `networkForecast`/`listActiveTrials`, `planTrial`.
+- 8 vitest cases (ScopeToggle render + onChange; Studies Planned grouping; TrialStatusActions role/status gating + plan click).
+
+**Tests:** backend 80 (+7), engine 30, frontend 63 (+8).

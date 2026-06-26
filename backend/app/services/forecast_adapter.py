@@ -16,7 +16,8 @@ will fail loud.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import enum
+from collections.abc import Collection, Iterable
 from datetime import date
 from uuid import UUID
 
@@ -47,6 +48,32 @@ from app.models.trial import Arm as DbArm
 from app.models.trial import Trial as DbTrial
 from app.models.trial import TrialStatus
 from app.models.visit import Visit as DbVisit
+
+
+class ForecastScope(enum.StrEnum):
+    """Which trial statuses a forecast or report includes (PRD §6.9).
+
+    The engine is status-agnostic; scope selection happens here in the adapter
+    so the network forecast, per-site views, metrics, and exports can all split
+    committed (active) volume from future pipeline (planned) volume.
+    """
+
+    ACTIVE = "active"  # committed, currently-running trials only (default)
+    PLANNED = "planned"  # future pipeline only
+    COMBINED = "combined"  # active + planned together
+
+
+_SCOPE_STATUSES: dict[ForecastScope, tuple[TrialStatus, ...]] = {
+    ForecastScope.ACTIVE: (TrialStatus.ACTIVE,),
+    ForecastScope.PLANNED: (TrialStatus.PLANNED,),
+    ForecastScope.COMBINED: (TrialStatus.ACTIVE, TrialStatus.PLANNED),
+}
+
+
+def scope_statuses(scope: ForecastScope) -> tuple[TrialStatus, ...]:
+    """Map a ForecastScope to the trial statuses it selects. ``draft`` and
+    ``archived`` are never forecast under any scope."""
+    return _SCOPE_STATUSES[scope]
 
 
 def _to_engine_visit(v: DbVisit) -> Visit:
@@ -111,16 +138,21 @@ async def build_commitments(
     *,
     trial_ids: Iterable[UUID] | None = None,
     site_ids: Iterable[UUID] | None = None,
-    active_only: bool = True,
+    statuses: Collection[TrialStatus] | None = (TrialStatus.ACTIVE,),
 ) -> list[Commitment]:
     """Construct ``Commitment`` tuples from persisted data.
 
     Filters:
       - ``trial_ids`` — only build commitments for these trials. Default: all.
       - ``site_ids`` — only build commitments for these sites. Default: all.
-      - ``active_only`` — when True (default), restrict to active trials *and*
-        active SiteTrial assignments. Use False for trial-detail views that
-        want to render drafts too.
+      - ``statuses`` — restrict to trials in these statuses. Default: active
+        only (preserves the original behavior). Pass a wider set (e.g. via
+        ``scope_statuses(ForecastScope.COMBINED)``) to include planned trials,
+        or ``None`` to skip status filtering entirely — used by single-trial
+        detail views that should preview a trial regardless of its status.
+
+    Inactive sites and inactive SiteTrial assignments are *always* excluded —
+    we never forecast against disabled sites/assignments, under any scope.
 
     The DB calls are kept linear rather than joined, in part for clarity and
     in part because RLS is policy-per-table and a single big JOIN is no
@@ -133,9 +165,8 @@ async def build_commitments(
     org_defaults = _org_duration_defaults_from(settings)
 
     # --- Sites ------------------------------------------------------------
-    sites_q = select(DbSite).where(DbSite.org_id == org_id)
-    if active_only:
-        sites_q = sites_q.where(DbSite.active.is_(True))
+    # Disabled sites are never forecast, regardless of scope.
+    sites_q = select(DbSite).where(DbSite.org_id == org_id, DbSite.active.is_(True))
     if site_ids is not None:
         site_ids_list = list(site_ids)
         if not site_ids_list:
@@ -148,8 +179,8 @@ async def build_commitments(
 
     # --- Trials -----------------------------------------------------------
     trials_q = select(DbTrial).where(DbTrial.org_id == org_id)
-    if active_only:
-        trials_q = trials_q.where(DbTrial.status == TrialStatus.ACTIVE)
+    if statuses is not None:
+        trials_q = trials_q.where(DbTrial.status.in_(tuple(statuses)))
     if trial_ids is not None:
         trial_ids_list = list(trial_ids)
         if not trial_ids_list:
@@ -191,12 +222,12 @@ async def build_commitments(
         visits_by_arm.setdefault(v.arm_id, []).append(v)
 
     # --- SiteTrials (assignments) ----------------------------------------
+    # Disabled assignments are never forecast, regardless of scope.
     st_q = select(SiteTrial).where(
         SiteTrial.trial_id.in_(trials_by_id.keys()),
         SiteTrial.site_id.in_(sites_by_id.keys()),
+        SiteTrial.active.is_(True),
     )
-    if active_only:
-        st_q = st_q.where(SiteTrial.active.is_(True))
     site_trials = (await db.execute(st_q)).scalars().all()
     if not site_trials:
         return []
@@ -233,8 +264,8 @@ async def build_commitments(
         if trial.attrition_curve_id is None:
             # No curve assigned — engine requires one. Skip silently; the
             # trial activation gate (Phase 2) should have caught this before
-            # any forecast call. Callers that want to render drafts can use
-            # active_only=False but should expect missing forecasts.
+            # any forecast call. Callers that want to render drafts can pass
+            # statuses=None but should expect missing forecasts.
             continue
         curve_db = curves_by_id.get(trial.attrition_curve_id)
         if curve_db is None:
@@ -290,11 +321,20 @@ async def compute_network_forecast(
     horizon_end: date,
     trial_ids: Iterable[UUID] | None = None,
     site_ids: Iterable[UUID] | None = None,
+    scope: ForecastScope = ForecastScope.ACTIVE,
+    any_status: bool = False,
 ) -> dict[tuple[str, date], ForecastCell]:
     """Build commitments + run the engine. Returns the engine's output keyed
-    by ``(site_id_str, week_start)``."""
+    by ``(site_id_str, week_start)``.
+
+    ``scope`` selects which trial statuses contribute (PRD §6.9); it defaults to
+    active-only. Set ``any_status=True`` to skip status filtering entirely —
+    used by single-trial detail views that preview a trial regardless of its
+    status (draft/planned/active/archived).
+    """
+    effective_statuses = None if any_status else scope_statuses(scope)
     commitments = await build_commitments(
-        db, org_id, trial_ids=trial_ids, site_ids=site_ids
+        db, org_id, trial_ids=trial_ids, site_ids=site_ids, statuses=effective_statuses
     )
     if not commitments:
         return {}

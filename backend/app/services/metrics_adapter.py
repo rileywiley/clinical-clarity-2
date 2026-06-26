@@ -6,6 +6,7 @@ this adapter does the DB reads and hands the engine plain inputs.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import date
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enrollment_week import EnrollmentWeek as DbEnrollmentWeek
 from app.models.site_trial import SiteTrial
 from app.models.trial import Trial as DbTrial
+from app.models.trial import TrialStatus
 
 
 def _to_engine_week(w: DbEnrollmentWeek) -> EnrollmentWeek:
@@ -70,24 +72,27 @@ async def compute_site_metrics_per_trial(
     window_start: date,
     window_end: date,
     today: date,
+    statuses: Collection[TrialStatus] | None = None,
 ) -> list[tuple[DbTrial, MetricsRow]]:
-    """All trials assigned to the site, each with its MetricsRow.
+    """All in-scope trials assigned to the site, each with its MetricsRow.
 
     Caller uses this for the per-site metrics panel + the Metrics page's
-    site-grouping view.
+    site-grouping view. ``statuses`` restricts to those trial statuses (PRD
+    §6.9 scope); ``None`` includes every assigned trial regardless of status.
     """
     # Trials assigned to this site via active SiteTrial.
-    rows = (
-        await db.execute(
-            select(SiteTrial, DbTrial)
-            .join(DbTrial, DbTrial.id == SiteTrial.trial_id)
-            .where(
-                SiteTrial.site_id == site_id,
-                SiteTrial.org_id == org_id,
-                SiteTrial.active.is_(True),
-            )
+    q = (
+        select(SiteTrial, DbTrial)
+        .join(DbTrial, DbTrial.id == SiteTrial.trial_id)
+        .where(
+            SiteTrial.site_id == site_id,
+            SiteTrial.org_id == org_id,
+            SiteTrial.active.is_(True),
         )
-    ).all()
+    )
+    if statuses is not None:
+        q = q.where(DbTrial.status.in_(tuple(statuses)))
+    rows = (await db.execute(q)).all()
 
     out: list[tuple[DbTrial, MetricsRow]] = []
     for _st, trial in rows:
