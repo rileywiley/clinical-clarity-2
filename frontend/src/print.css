@@ -53,4 +53,30 @@
   .recharts-responsive-container {
     page-break-inside: avoid;
   }
+
+  /* Dark mode must not bleed into the PDF — with print-color-adjust:exact the
+     dark surfaces would otherwise print. Force neutral surfaces back to light;
+     `html.dark .token` (0,2,1) + !important beats the dark overrides. Status
+     band colors are intentionally left to print (handled above). */
+  html.dark {
+    background: #fff !important;
+  }
+  html.dark .bg-white,
+  html.dark .bg-slate-50,
+  html.dark .bg-slate-100 {
+    background-color: #fff !important;
+  }
+  html.dark .text-slate-900,
+  html.dark .text-slate-800,
+  html.dark .text-slate-700,
+  html.dark .text-slate-600,
+  html.dark .text-slate-500,
+  html.dark .text-slate-400 {
+    color: #0f172a !important;
+  }
+  html.dark .border-slate-300,
+  html.dark .border-slate-200,
+  html.dark .border-slate-100 {
+    border-color: #cbd5e1 !important;
+  }
 }

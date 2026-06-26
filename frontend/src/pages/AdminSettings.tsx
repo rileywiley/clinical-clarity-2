@@ -17,7 +17,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type Me } from "../api";
+import { ApiError, api, type Me, type SiteOut } from "../api";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 export default function AdminSettings({ me }: { me: Me }) {
@@ -45,11 +46,29 @@ export default function AdminSettings({ me }: { me: Me }) {
       <h1 className="text-2xl font-semibold">Admin settings</h1>
 
       <ForecastingDefaults />
+      <Appearance />
       <DisplayDefaults />
       <OrgDefaults />
+      <SiteManagement />
       <UserManagement />
       <DangerZone />
     </div>
+  );
+}
+
+// --- Appearance (theme) -------------------------------------------------
+
+function Appearance() {
+  return (
+    <Section
+      title="Appearance"
+      hint="Light or dark theme. Saved in this browser (per-device, not org-wide)."
+    >
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-slate-600">Theme</span>
+        <ThemeToggle />
+      </div>
+    </Section>
   );
 }
 
@@ -497,6 +516,247 @@ function NumField({
         data-testid={dataTestid}
       />
     </label>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  dataTestid,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  dataTestid?: string;
+}) {
+  return (
+    <label className="text-sm">
+      <span className="block text-xs font-medium text-slate-600">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-0.5 w-full rounded border border-slate-300 px-2 py-1.5"
+        data-testid={dataTestid}
+      />
+    </label>
+  );
+}
+
+// --- Site management — edit site details --------------------------------
+
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function fmtDays(days: number[]): string {
+  return days.length === 0
+    ? "—"
+    : [...days].sort((a, b) => a - b).map((d) => DAY_LABELS[d]).join(" ");
+}
+
+function SiteManagement() {
+  const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  const [editing, setEditing] = useState<SiteOut | null>(null);
+  const sites = sitesQ.data ?? [];
+
+  return (
+    <Section
+      title="Sites"
+      hint="Edit a site's capacity (rooms, hours/day, operating days), timezone, address, or active state. Capacity changes re-flow live to the forecast."
+    >
+      {sitesQ.isLoading ? (
+        <p className="text-sm text-slate-500">Loading…</p>
+      ) : sites.length === 0 ? (
+        <p className="text-sm text-slate-500">No sites in this org yet.</p>
+      ) : (
+        <div className="overflow-x-auto rounded border border-slate-200">
+          <table className="w-full text-sm" data-testid="site-management-table">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="px-3 py-2">Site</th>
+                <th className="px-3 py-2">Timezone</th>
+                <th className="px-3 py-2 text-right">Rooms</th>
+                <th className="px-3 py-2 text-right">Hours/day</th>
+                <th className="px-3 py-2">Days</th>
+                <th className="px-3 py-2">Active</th>
+                <th className="px-3 py-2 text-right">Edit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((s) => (
+                <tr key={s.id} className="border-t border-slate-100">
+                  <td className="px-3 py-1.5 font-medium text-slate-800">{s.name}</td>
+                  <td className="px-3 py-1.5 text-slate-600">{s.timezone}</td>
+                  <td className="px-3 py-1.5 text-right">{s.rooms}</td>
+                  <td className="px-3 py-1.5 text-right">{s.hours_per_day}</td>
+                  <td className="px-3 py-1.5 text-slate-600">{fmtDays(s.operating_weekdays)}</td>
+                  <td className="px-3 py-1.5 text-slate-600">{s.active ? "Yes" : "No"}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(s)}
+                      className="rounded border border-slate-300 px-2 py-1 text-xs"
+                      data-testid={`site-edit-${s.id}`}
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (
+        <EditSiteModal site={editing} onClose={() => setEditing(null)} />
+      )}
+    </Section>
+  );
+}
+
+function EditSiteModal({
+  site,
+  onClose,
+}: {
+  site: SiteOut;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(site.name);
+  const [address, setAddress] = useState(site.address ?? "");
+  const [timezone, setTimezone] = useState(site.timezone);
+  const [rooms, setRooms] = useState(String(site.rooms));
+  const [hours, setHours] = useState(String(site.hours_per_day));
+  const [weekdays, setWeekdays] = useState<number[]>(site.operating_weekdays);
+  const [active, setActive] = useState(site.active);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function toggleDay(d: number) {
+    setWeekdays((w) =>
+      w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort((a, b) => a - b),
+    );
+  }
+
+  async function save() {
+    setErr(null);
+    const r = Number(rooms);
+    const h = Number(hours);
+    if (!Number.isInteger(r) || r < 1) return setErr("Rooms must be a whole number ≥ 1.");
+    if (!Number.isFinite(h) || h <= 0 || h > 24) return setErr("Hours/day must be between 1 and 24.");
+    if (weekdays.length === 0) return setErr("Pick at least one operating day.");
+    if (!name.trim()) return setErr("Name is required.");
+    if (!timezone.trim()) return setErr("Timezone is required.");
+
+    setSaving(true);
+    try {
+      await api.patchSite(site.id, {
+        name: name.trim(),
+        address: address.trim() || null,
+        timezone: timezone.trim(),
+        operating_weekdays: weekdays,
+        hours_per_day: h,
+        rooms: r,
+        active,
+      });
+      // Capacity inputs feed the engine — refresh sites + every forecast view.
+      qc.invalidateQueries({ queryKey: ["sites"] });
+      qc.invalidateQueries({ queryKey: ["forecast-network"] });
+      qc.invalidateQueries({ queryKey: ["site-forecast", site.id] });
+      onClose();
+    } catch (e) {
+      setErr(
+        e instanceof ApiError
+          ? `Save failed (${e.status}).`
+          : "Save failed. Check the values and try again.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4"
+      data-testid="edit-site-modal"
+    >
+      <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-lg">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">
+          Edit site — {site.name}
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <LabeledInput label="Name" value={name} onChange={setName} dataTestid="site-name" />
+          <LabeledInput label="Timezone (IANA)" value={timezone} onChange={setTimezone} dataTestid="site-tz" />
+          <LabeledInput label="Address" value={address} onChange={setAddress} dataTestid="site-address" />
+          <LabeledInput label="Rooms" type="number" value={rooms} onChange={setRooms} dataTestid="site-rooms" />
+          <LabeledInput label="Hours / day" type="number" value={hours} onChange={setHours} dataTestid="site-hours" />
+          <label className="flex items-end gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+              data-testid="site-active"
+            />
+            <span className="mb-0.5 text-slate-700">Active</span>
+          </label>
+        </div>
+
+        <div className="mt-3">
+          <span className="mb-1 block text-xs font-medium text-slate-600">
+            Operating days
+          </span>
+          <div className="flex flex-wrap gap-1.5" data-testid="site-weekdays">
+            {DAY_LABELS.map((label, d) => {
+              const on = weekdays.includes(d);
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => toggleDay(d)}
+                  aria-pressed={on}
+                  className={
+                    "rounded border px-2 py-1 text-xs " +
+                    (on
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 bg-white text-slate-700")
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {err && (
+          <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+            {err}
+          </p>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+            data-testid="site-save-button"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

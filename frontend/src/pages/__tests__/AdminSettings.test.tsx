@@ -30,6 +30,7 @@ vi.mock("../../api", async () => {
       patchUser: vi.fn(),
       // DangerZone (post-P6) fans out to list sites + trials.
       listSites: vi.fn(),
+      patchSite: vi.fn(),
       listTrials: vi.fn(),
       getSiteDeleteImpact: vi.fn(),
       getTrialDeleteImpact: vi.fn(),
@@ -110,6 +111,35 @@ describe("AdminSettings", () => {
         expect.objectContaining({ dur_screening_hours: 1.25 }),
       );
     });
+  });
+
+  it("site management: edits rooms and saves via patchSite", async () => {
+    (api.listSites as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "site1",
+        name: "Alpha",
+        address: null,
+        timezone: "UTC",
+        operating_weekdays: [0, 1, 2, 3, 4],
+        hours_per_day: 10,
+        rooms: 2,
+        active: true,
+      },
+    ]);
+    (api.patchSite as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    renderPage(ADMIN);
+
+    fireEvent.click(await screen.findByTestId("site-edit-site1"));
+    const rooms = (await screen.findByTestId("site-rooms")) as HTMLInputElement;
+    expect(rooms.value).toBe("2");
+    fireEvent.change(rooms, { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("site-save-button"));
+
+    await waitFor(() => expect(api.patchSite).toHaveBeenCalled());
+    const [id, payload] = (api.patchSite as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(id).toBe("site1");
+    expect(payload.rooms).toBe(5);
+    expect(payload.timezone).toBe("UTC");
   });
 
   it("danger zone: opening a trial delete shows the active-block when status=active", async () => {

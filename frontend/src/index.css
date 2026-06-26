@@ -1,3 +1,49 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Dark mode (class strategy — `dark` on <html>, set by lib/theme.ts or system
+   preference). The app styles surfaces with literal Tailwind palette classes,
+   so rather than add `dark:` variants to ~470 call sites we remap the neutral
+   surface / text / border utilities under `.dark`. `.dark .token`
+   (specificity 0,2,0) beats the base `.token` (0,1,0), so no !important is
+   needed. Semantic status colors (emerald / amber / red / indigo bands and
+   alert chips) are intentionally left untouched so the heatmap stays readable.
+--------------------------------------------------------------------------- */
+.dark {
+  background-color: #0f172a; /* covers overscroll above the body */
+  color-scheme: dark; /* native scrollbars, date pickers, etc. go dark */
+}
+
+/* Surfaces */
+.dark .bg-white { background-color: #1e293b; } /* cards / panels → slate-800 */
+.dark .bg-slate-50 { background-color: #0f172a; } /* page bg, table headers → slate-900 */
+.dark .bg-slate-100 { background-color: #334155; } /* subtle chips → slate-700 */
+/* Primary buttons (bg-slate-900 text-white) → slate-600 so white text stays
+   readable and they lift off the slate-800 cards. The modal scrim uses the
+   distinct `bg-slate-900/40` token, which this selector does not match. */
+.dark .bg-slate-900 { background-color: #475569; }
+.dark .hover\:bg-slate-50:hover { background-color: #334155; }
+.dark .hover\:bg-slate-100:hover { background-color: #334155; }
+
+/* Text */
+.dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-slate-800 { color: #f1f5f9; }
+.dark .text-slate-700 { color: #e2e8f0; }
+.dark .text-slate-600 { color: #cbd5e1; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #64748b; }
+.dark .hover\:text-slate-800:hover { color: #f1f5f9; }
+
+/* Borders */
+.dark .border-slate-300 { border-color: #475569; }
+.dark .border-slate-200 { border-color: #334155; }
+.dark .border-slate-100 { border-color: #334155; }
+
+/* Form controls inherit text color via preflight; fix muted placeholders. */
+.dark input,
+.dark select,
+.dark textarea { color: #e2e8f0; }
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b; }
