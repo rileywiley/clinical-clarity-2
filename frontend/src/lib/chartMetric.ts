@@ -5,14 +5,15 @@
 
 import { useCallback, useState } from "react";
 
-export type ChartMetric = "hours" | "visits";
+export type ChartMetric = "hours" | "visits" | "revenue";
 
 const KEY = "chart.metric";
 
 export function useChartMetric(): [ChartMetric, (m: ChartMetric) => void] {
-  const [metric, set] = useState<ChartMetric>(() =>
-    localStorage.getItem(KEY) === "visits" ? "visits" : "hours",
-  );
+  const [metric, set] = useState<ChartMetric>(() => {
+    const v = localStorage.getItem(KEY);
+    return v === "visits" || v === "revenue" ? v : "hours";
+  });
   const setMetric = useCallback((m: ChartMetric) => {
     localStorage.setItem(KEY, m);
     set(m);

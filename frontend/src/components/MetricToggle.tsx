@@ -9,6 +9,7 @@ import type { ChartMetric } from "../lib/chartMetric";
 const OPTIONS: { value: ChartMetric; label: string }[] = [
   { value: "hours", label: "Hours" },
   { value: "visits", label: "Visits" },
+  { value: "revenue", label: "Revenue" },
 ];
 
 export function MetricToggle({
