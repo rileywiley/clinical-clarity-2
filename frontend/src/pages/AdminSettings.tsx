@@ -16,8 +16,8 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { ApiError, api, type Me, type SiteOut } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -36,13 +36,9 @@ export default function AdminSettings({ me }: { me: Me }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
-      <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/" className="hover:underline">
-          Network
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">Admin settings</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: "Network", to: "/" }, { label: "Admin settings" }]}
+      />
       <h1 className="text-2xl font-semibold">Admin settings</h1>
 
       <ForecastingDefaults />

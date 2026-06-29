@@ -6,8 +6,8 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { api } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { TrialColorBadge } from "../components/TrialColorBadge";
 import { fmtCount, fmtPct, fmtPct1 } from "../lib/formatters";
 
@@ -44,13 +44,9 @@ export default function Metrics() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <nav className="mb-4 text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/" className="hover:underline">
-          Network
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">Metrics</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: "Network", to: "/" }, { label: "Metrics" }]}
+      />
 
       <header className="mb-4">
         <h1 className="text-2xl font-semibold">Enrollment metrics</h1>

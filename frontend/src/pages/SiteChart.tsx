@@ -22,6 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { KpiStrip } from "../components/KpiStrip";
 import { MetricToggle } from "../components/MetricToggle";
 import { useChartMetric } from "../lib/chartMetric";
@@ -82,9 +83,10 @@ export default function SiteChart() {
     return m;
   }, [trialsQ.data]);
 
-  // Build the chart series. In "hours" mode we proportionally allocate the
-  // cell's demand_hours across types/trials by visit weight; in "visits" mode
-  // the raw counts are the series values directly (scale = 1).
+  // Build the chart series. "hours" and "revenue" proportionally allocate the
+  // cell's demand_hours / revenue across types/trials by visit weight; "visits"
+  // uses the raw counts directly (scale = 1). Revenue comes from the SoA visit
+  // prices the engine already folded into each cell's revenue.
   const chartData = useMemo(() => {
     return cells.map((c) => {
       const totalVisits = Object.values(c.visits_by_type).reduce(
@@ -98,7 +100,12 @@ export default function SiteChart() {
         demand: c.demand_hours,
       };
       if (totalVisits === 0) return row;
-      const scale = metric === "hours" ? c.demand_hours / totalVisits : 1;
+      const scale =
+        metric === "hours"
+          ? c.demand_hours / totalVisits
+          : metric === "revenue"
+            ? c.revenue / totalVisits
+            : 1;
       if (stackBy === "trial") {
         for (const [trialId, count] of Object.entries(c.visits_by_trial)) {
           row[`trial:${trialId}`] = count * scale;
@@ -165,13 +172,7 @@ export default function SiteChart() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <nav className="mb-4 text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/" className="hover:underline">
-          Network
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">{site.name}</span>
-      </nav>
+      <Breadcrumbs items={[{ label: "Network", to: "/" }, { label: site.name }]} />
 
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{site.name}</h1>
@@ -245,12 +246,36 @@ export default function SiteChart() {
             {(trialsAtSiteQ.data ?? []).map((row) => (
               <tr key={row.id} className="border-t border-slate-100">
                 <td className="px-3 py-1.5">
-                  <Link
-                    to={`/trials/${row.trial_id}`}
-                    className="hover:underline"
-                  >
-                    <TrialColorBadge trialId={row.trial_id} name={row.trial_name} />
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/trials/${row.trial_id}`}
+                      className="hover:underline"
+                    >
+                      <TrialColorBadge trialId={row.trial_id} name={row.trial_name} />
+                    </Link>
+                    <Link
+                      to={`/projections?site=${siteId}&trial=${row.trial_id}`}
+                      title="Open this study's projections for this site"
+                      aria-label={`Projections for ${row.trial_name}`}
+                      data-testid={`site-trial-projections-${row.trial_id}`}
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+                      </svg>
+                    </Link>
+                  </div>
                 </td>
                 <td className="px-3 py-1.5 text-slate-600">
                   <StatusPill status={row.trial_status} />
@@ -331,15 +356,27 @@ export default function SiteChart() {
             <CartesianGrid stroke="#f1f5f9" />
             <XAxis dataKey="label" />
             <YAxis
+              tickFormatter={
+                metric === "revenue" ? (v: number) => fmtUsd(v) : undefined
+              }
               label={{
-                value: metric === "hours" ? "room-hours / week" : "visits / week",
+                value:
+                  metric === "hours"
+                    ? "room-hours / week"
+                    : metric === "revenue"
+                      ? "revenue / week"
+                      : "visits / week",
                 angle: -90,
                 position: "insideLeft",
               }}
             />
             <Tooltip
               formatter={(v: number) =>
-                metric === "hours" ? `${v.toFixed(1)} hr` : `${v.toFixed(1)} visits`
+                metric === "hours"
+                  ? `${v.toFixed(1)} hr`
+                  : metric === "revenue"
+                    ? fmtUsd(v)
+                    : `${v.toFixed(1)} visits`
               }
               labelFormatter={(label, payload) => {
                 const wk = payload?.[0]?.payload?.week_start;

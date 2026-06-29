@@ -18,7 +18,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ApiError, api, type EnrollmentWeekIn, type EnrollmentWeekOut } from "../api";
 import { SpreadsheetGrid } from "../components/SpreadsheetGrid";
 import type { CellCoord, CellState, ColumnSpec } from "../components/SpreadsheetGrid";
@@ -91,8 +92,15 @@ export default function ProjectionGrid() {
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
   const trialsQ = useQuery({ queryKey: ["trials"], queryFn: api.listTrials });
 
-  const [trialId, setTrialId] = useState<string | null>(null);
-  const [siteId, setSiteId] = useState<string | null>(null);
+  // Deep-link support: ?site=&trial= pre-selects the pickers (e.g. clicking an
+  // assigned study on the site page jumps straight to its projections).
+  const [searchParams] = useSearchParams();
+  const [trialId, setTrialId] = useState<string | null>(
+    () => searchParams.get("trial"),
+  );
+  const [siteId, setSiteId] = useState<string | null>(
+    () => searchParams.get("site"),
+  );
 
   // Auto-pick the first option if available so the page isn't a blank picker
   // forever — easier to demo.
@@ -118,6 +126,7 @@ export default function ProjectionGrid() {
     enabled: !!trialId,
   });
 
+  const selectedSite = sitesQ.data?.find((s) => s.id === siteId) ?? null;
   const armId = armsQ.data?.[0]?.id ?? null;
   const siteTrial = useMemo(
     () =>
@@ -240,11 +249,17 @@ export default function ProjectionGrid() {
   // --- Render ---------------------------------------------------------
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-4 flex items-center justify-between">
+      <Breadcrumbs
+        items={[
+          { label: "Network", to: "/" },
+          ...(selectedSite
+            ? [{ label: selectedSite.name, to: `/sites/${selectedSite.id}` }]
+            : []),
+          { label: "Projections" },
+        ]}
+      />
+      <div className="mb-4">
         <h1 className="text-2xl font-semibold">Projections &amp; actuals</h1>
-        <Link to="/" className="text-sm text-slate-500 hover:underline">
-          ← Home
-        </Link>
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-4 rounded border border-slate-200 bg-white p-4">

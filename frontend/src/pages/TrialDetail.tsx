@@ -35,6 +35,7 @@ import {
   type ParsedVisitOut,
   type SoaParseJobOut,
 } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { KpiStrip } from "../components/KpiStrip";
 import { MetricToggle } from "../components/MetricToggle";
 import { useChartMetric } from "../lib/chartMetric";
@@ -132,6 +133,7 @@ export default function TrialDetail() {
         label: fmtMonDay(c.week_start),
         hours: c.demand_hours,
         visits: Object.values(c.visits_by_type).reduce((a, b) => a + b, 0),
+        revenue: c.revenue,
       })),
     [cells],
   );
@@ -159,13 +161,9 @@ export default function TrialDetail() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <nav className="mb-4 text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/studies" className="hover:underline">
-          Studies
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">{trial.name}</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: "Studies", to: "/studies" }, { label: trial.name }]}
+      />
 
       <header className="mb-4 flex flex-wrap items-center gap-3">
         <span
@@ -255,7 +253,12 @@ export default function TrialDetail() {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-medium text-slate-700">
             Trial forecast contribution —{" "}
-            {metric === "hours" ? "demand hours" : "visits"} / week
+            {metric === "hours"
+              ? "demand hours"
+              : metric === "revenue"
+                ? "revenue"
+                : "visits"}{" "}
+            / week
           </h2>
           <MetricToggle value={metric} onChange={setMetric} />
         </div>
@@ -263,10 +266,18 @@ export default function TrialDetail() {
           <AreaChart data={chartData} margin={{ top: 8, right: 24, bottom: 8, left: 0 }}>
             <CartesianGrid stroke="#f1f5f9" />
             <XAxis dataKey="label" />
-            <YAxis />
+            <YAxis
+              tickFormatter={
+                metric === "revenue" ? (v: number) => fmtUsd(v) : undefined
+              }
+            />
             <Tooltip
               formatter={(v: number) =>
-                metric === "hours" ? `${v.toFixed(1)} hr` : `${v.toFixed(1)} visits`
+                metric === "hours"
+                  ? `${v.toFixed(1)} hr`
+                  : metric === "revenue"
+                    ? fmtUsd(v)
+                    : `${v.toFixed(1)} visits`
               }
             />
             <Area

@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type DailyVisitsOut } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { bandClasses, classifyUtil } from "../lib/utilization";
 import { fmtCount, fmtPct } from "../lib/formatters";
 
@@ -110,17 +111,13 @@ export default function SiteCalendar() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <nav className="mb-4 text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/" className="hover:underline">
-          Network
-        </Link>
-        <span className="mx-2">/</span>
-        <Link to={`/sites/${siteId}`} className="hover:underline">
-          {site?.name ?? "site"}
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">Calendar</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { label: "Network", to: "/" },
+          { label: site?.name ?? "site", to: `/sites/${siteId}` },
+          { label: "Calendar" },
+        ]}
+      />
 
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{site?.name ?? "Site"} — Calendar</h1>

@@ -12,6 +12,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type TrialOut, type TrialStatus } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { TrialColorBadge } from "../components/TrialColorBadge";
 import { TrialStatusActions } from "../components/TrialStatusActions";
 import { ReadinessIcons } from "../components/ReadinessIcons";
@@ -73,6 +74,7 @@ export default function Studies() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
+      <Breadcrumbs items={[{ label: "Network", to: "/" }, { label: "Studies" }]} />
       <header className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Studies</h1>
         <Link

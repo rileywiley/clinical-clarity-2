@@ -12,8 +12,8 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { ApiError, api, type Me } from "../api";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 type Kind = "sites" | "trials" | "projections";
@@ -35,6 +35,8 @@ const KIND_HINT: Record<Kind, string> = {
 
 export default function Import({ me }: { me: Me }) {
   useDocumentTitle("Import");
+  // Hooks must run before any early return (rules-of-hooks).
+  const [kind, setKind] = useState<Kind>("sites");
 
   if (me.role !== "org_admin") {
     return (
@@ -47,17 +49,11 @@ export default function Import({ me }: { me: Me }) {
     );
   }
 
-  const [kind, setKind] = useState<Kind>("sites");
-
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-6">
-      <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
-        <Link to="/" className="hover:underline">
-          Network
-        </Link>
-        <span className="mx-2">/</span>
-        <span className="text-slate-800">Bulk import</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: "Network", to: "/" }, { label: "Bulk import" }]}
+      />
 
       <header>
         <h1 className="text-2xl font-semibold">Bulk import</h1>
