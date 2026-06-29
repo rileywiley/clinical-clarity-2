@@ -306,10 +306,16 @@ export const api = {
       `/forecast/network${qs.toString() ? "?" + qs : ""}`,
     );
   },
-  siteForecast: (siteId: string, from?: string, to?: string) => {
+  siteForecast: (
+    siteId: string,
+    from?: string,
+    to?: string,
+    scope?: ForecastScope,
+  ) => {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
+    if (scope) qs.set("scope", scope);
     return request<ForecastCellOut[]>(
       `/sites/${siteId}/forecast${qs.toString() ? "?" + qs : ""}`,
     );

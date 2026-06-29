@@ -57,14 +57,17 @@ export default function SiteChart() {
   const [metric, setMetric] = useChartMetric();
 
   const sitesQ = useQuery({ queryKey: ["sites"], queryFn: api.listSites });
+  // The per-site chart shows committed (active) + pipeline (planned) volume.
   const cellsQ = useQuery({
-    queryKey: ["site-forecast", siteId],
-    queryFn: () => api.siteForecast(siteId),
+    queryKey: ["site-forecast", siteId, "combined"],
+    queryFn: () => api.siteForecast(siteId, undefined, undefined, "combined"),
     enabled: !!siteId,
   });
+  // Combined trial list so the legend resolves planned trials' names too
+  // (the active-only list left planned series labelled with a UUID fragment).
   const trialsQ = useQuery({
-    queryKey: ["trials-active"],
-    queryFn: api.listActiveTrials,
+    queryKey: ["trials-scoped", "combined"],
+    queryFn: () => api.listActiveTrials("combined"),
   });
   const trialsAtSiteQ = useQuery({
     queryKey: ["trials-at-site", siteId],
@@ -178,7 +181,7 @@ export default function SiteChart() {
         <h1 className="text-2xl font-semibold">{site.name}</h1>
         <div className="flex items-center gap-2 no-print">
           <a
-            href={`/api/sites/${siteId}/forecast.csv`}
+            href={`/api/sites/${siteId}/forecast.csv?scope=combined`}
             className="rounded border border-slate-300 px-3 py-1.5 text-sm"
             data-testid="export-site-csv"
           >
@@ -209,8 +212,9 @@ export default function SiteChart() {
               value: fmtPct(kpis.currentUtil),
             },
             {
-              label: "Active trials",
+              label: "Trials",
               value: String(kpis.activeTrials),
+              sublabel: "active + planned",
             },
             {
               label: "Projected overage",
